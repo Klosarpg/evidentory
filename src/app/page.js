@@ -1,85 +1,88 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { useRouter } from 'next/navigation'; // <-- Dodali smo ruter za prebacivanje
 
-export default function Home() {
-  const [email, setEmail] = useState('');
+export default function Login() {
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [message, setMessage] = useState('');
-  const router = useRouter(); // <-- Aktivirali smo ruter
+  const [greska, setGreska] = useState('');
+  const [loading, setLoading] = useState(false);
+  const router = useRouter();
 
-  const handleSignUp = async () => {
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-    });
-    if (error) {
-      setMessage('Greška: ' + error.message);
-    } else {
-      setMessage('Uspešna registracija! (Proveri Supabase)');
-    }
-  };
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setGreska('');
 
-  const handleLogin = async () => {
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
+    // TRIK: Pretvaramo username u "lažni" email koji Supabase očekuje
+    const formattedEmail = `${username.toLowerCase().trim()}@evidentory.com`;
+
+    const { error } = await supabase.auth.signInWithPassword({
+      email: formattedEmail,
+      password: password,
     });
+
     if (error) {
-      setMessage('Greška: ' + error.message);
+      setGreska('Pogrešno korisničko ime ili lozinka.');
+      setLoading(false);
     } else {
-      setMessage('Uspešno si prijavljen! Učitavam...');
-      router.push('/dashboard'); // <-- Ovo te prebacuje na Dashboard!
+      router.push('/dashboard');
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100">
-      <div className="bg-white p-8 rounded-lg shadow-md w-96">
-        <h1 className="text-2xl font-bold mb-6 text-center text-gray-800">Evidentory</h1>
-        
-        <div className="space-y-4">
+    <div className="min-h-screen bg-[#f3f4f6] flex items-center justify-center p-4 font-sans">
+      <div className="bg-white p-8 md:p-10 rounded-2xl shadow-xl w-full max-w-md border border-slate-100">
+        <div className="text-center mb-8">
+          <h1 className="text-3xl font-black text-slate-900 tracking-tight">EVIDENTORY</h1>
+          <p className="text-sm text-slate-500 mt-2 font-medium">Sistem za upravljanje zalihama</p>
+        </div>
+
+        {greska && (
+          <div className="mb-6 p-3 bg-red-50 border border-red-200 text-red-600 text-sm font-semibold rounded-xl text-center">
+            {greska}
+          </div>
+        )}
+
+        <form onSubmit={handleLogin} className="space-y-5">
           <div>
-            <label className="block text-sm font-medium text-gray-700">Email</label>
-            <input 
-              type="email" 
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="tvoj@email.com"
+            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
+              Korisničko ime
+            </label>
+            <input
+              type="text"
+              required
+              placeholder="Username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              className="w-full border border-slate-200 px-4 py-3 rounded-xl bg-slate-50 outline-none focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all font-medium text-slate-800"
             />
           </div>
-          
+
           <div>
-            <label className="block text-sm font-medium text-gray-700">Lozinka</label>
-            <input 
-              type="password" 
+            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
+              Lozinka
+            </label>
+            <input
+              type="password"
+              required
+              placeholder="••••••••"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="********"
+              className="w-full border border-slate-200 px-4 py-3 rounded-xl bg-slate-50 outline-none focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all font-medium text-slate-800"
             />
           </div>
 
-          {message && <p className="text-sm text-center text-blue-600 font-medium">{message}</p>}
-
-          <div className="flex gap-4 pt-4">
-            <button 
-              onClick={handleLogin}
-              className="w-full bg-blue-600 text-white py-2 rounded-md hover:bg-blue-700 transition"
-            >
-              Prijavi se
-            </button>
-            <button 
-              onClick={handleSignUp}
-              className="w-full bg-gray-200 text-gray-800 py-2 rounded-md hover:bg-gray-300 transition"
-            >
-              Registruj se
-            </button>
-          </div>
-        </div>
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 rounded-xl transition-all shadow-lg shadow-blue-200 mt-2 disabled:bg-blue-400"
+          >
+            {loading ? 'Prijavljivanje...' : 'Prijavi se'}
+          </button>
+        </form>
       </div>
     </div>
   );
