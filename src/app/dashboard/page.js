@@ -23,6 +23,16 @@ const urlToBase64 = async (url) => {
   }
 };
 
+const izbaciKvacice = (tekst) => {
+  if (!tekst) return '';
+  return tekst
+    .replace(/č/g, 'c').replace(/Č/g, 'C')
+    .replace(/ć/g, 'c').replace(/Ć/g, 'C')
+    .replace(/š/g, 's').replace(/Š/g, 'S')
+    .replace(/ž/g, 'z').replace(/Ž/g, 'Z')
+    .replace(/đ/g, 'dj').replace(/Đ/g, 'Dj');
+};
+
 const parsirajKomentarOtpremnice = (komentar) => {
   const regex = /Broj:\s*([^\s|]+)\s*\|\s*Kupac:\s*([^|]+)\s*\|\s*Grad:\s*([^|]+)\s*\|\s*Predao:\s*(.+)/;
   const match = komentar?.match(regex);
@@ -209,6 +219,19 @@ export default function Dashboard() {
     return Object.keys(klijentiSume).filter(k => klijentiSume[k] > 0).map(k => ({ klijent: k, kolicina: klijentiSume[k] }));
   };
 
+  // 📌 POŠTENO VRAĆENA FUNKCIJA: Popravljen dodaj artikal crash!
+  const dodajNoviArtikal = async (e) => {
+    e.preventDefault();
+    if (!naziv) return;
+    const { error } = await supabase.from('oprema').insert([{ 
+      naziv, oznaka, opis, kategorija, kolicina: 0, rezervisano: 0, plu: plu ? Number(plu) : 0 
+    }]);
+    if (!error) {
+      setOtvorenModal(null); setNaziv(''); setOznaka(''); setOpis(''); setKategorija('Nekategorisano'); setPlu('');
+      inicijalizujAplikaciju(); 
+    } else paziIPokreniObavestenje("Greška", error.message);
+  };
+
   const otvoriUrediArtikal = (art) => {
     const pocetni = art || oprema[0];
     if (!pocetni) return paziIPokreniObavestenje("Obaveštenje", "Baza je prazna!");
@@ -249,7 +272,7 @@ export default function Dashboard() {
     });
   };
 
-  const dodajIliAzurirajKomitenta = async (e) => {
+  const dogodiSeIzmenaKomitenta = async (e) => {
     e.preventDefault();
     if (!adminKomitentNaziv) return;
     if (urediKomitentId) {
@@ -335,107 +358,7 @@ export default function Dashboard() {
     return `${prefix}_${maxIndex + 1}_${godina}`; 
   };
 
-  const dodajStavkuUlaza = () => setStavkeUlaza([...stavkeUlaza, { opremaId: oprema[0]?.id || '', kolicina: 1 }]);
-  const ukloniStavkuUlaza = (index) => setStavkeUlaza(stavkeUlaza.filter((_, i) => i !== index));
-  const promeniStavkuUlaza = (index, polje, vrednost) => {
-    const noveStavke = [...stavkeUlaza];
-    noveStavke[index][polje] = vrednost;
-    setStavkeUlaza(noveStavke);
-  };
-
-  const izvrsiBrziUlaz = async (e) => {
-    e.preventDefault();
-    if (!dobavljacId) return paziIPokreniObavestenje("Upozorenje", "Izaberite dobavljača!");
-    if (stavkeUlaza.length === 0 || stavkeUlaza.some(s => !s.opremaId)) return paziIPokreniObavestenje("Upozorenje", "Izaberite ispravne artikle.");
-
-    let konacniDobavljac = '';
-    if (dobavljacId === 'novo') {
-      if (!noviDobavljacNaziv) return alert("Molimo unesite naziv novog dobavljača.");
-      await supabase.from('komitenti').insert([{ naziv: noviDobavljacNaziv, grad: noviDobavljacGrad || '', tip: 'Dobavljac' }]);
-      konacniDobavljac = `${noviDobavljacNaziv} (${noviDobavljacGrad || '-'})`;
-    } else {
-      const kom = komitenti.find(k => k.id == dobavljacId);
-      konacniDobavljac = kom ? `${kom.naziv} (${kom.grad || '-'})` : 'Nepoznato';
-    }
-    
-    for (let stavka of stavkeUlaza) {
-      const artikalUBazi = oprema.find(o => o.id == stavka.opremaId);
-      const novaKolicina = artikalUBazi.kolicina + Number(stavka.kolicina);
-      
-      await supabase.from('oprema').update({ kolicina: novaKolicina }).eq('id', artikalUBazi.id);
-      await supabase.from('istorija').insert([{ 
-        artikal: artikalUBazi.naziv, tip: 'BRZI_ULAZ', kolicina: Number(stavka.kolicina), 
-        komentar: `Dobavljač: ${konacniDobavljac} | ${komentar || 'Prijem robe'}`,
-        korisnik: korisnikEmail
-      }]);
-    }
-
-    setOtvorenModal(null); setStavkeUlaza([{ opremaId: oprema[0]?.id || '', kolicina: 1 }]); setKomentar(''); setDobavljacId(''); setNoviDobavljacNaziv(''); setNoviDobavljacGrad('');
-    inicijalizujAplikaciju();
-  };
-
-  const izvrsiRezervacijuOpreme = async (e) => {
-    e.preventDefault();
-    if (!izabraniArtikal || kolicinaAkcija <= 0 || !rezervacijaKupacId) return;
-
-    const trenutnoRezervisano = izabraniArtikal.rezervisano || 0;
-    const slobodnoStanje = izabraniArtikal.kolicina - trenutnoRezervisano;
-
-    if (Number(kolicinaAkcija) > slobodnoStanje) {
-      return paziIPokreniObavestenje("Nema slobodnih zaliha", `Nemoguće rezervisati! Na stanju imate ukupno ${izabraniArtikal.kolicina}, od čega je već ${trenutnoRezervisano} rezervisano. Slobodno za novu rezervaciju: ${slobodnoStanje}.`);
-    }
-
-    let konacniKupac = '';
-    if (rezervacijaKupacId === 'novo') {
-      if (!noviRezKupacNaziv) return alert("Unesite ime novog klijenta.");
-      await supabase.from('komitenti').insert([{ naziv: noviRezKupacNaziv, grad: noviRezKupacGrad, tip: 'Kupac' }]);
-      konacniKupac = `${noviRezKupacNaziv} (${noviRezKupacGrad})`;
-    } else {
-      const kom = komitenti.find(k => k.id == rezervacijaKupacId);
-      konacniKupac = kom ? `${kom.naziv} (${kom.grad || '-'})` : 'Nepoznato';
-    }
-
-    const novoRezervisanoStanje = trenutnoRezervisano + Number(kolicinaAkcija);
-    const { error: upError } = await supabase.from('oprema').update({ rezervisano: novoRezervisanoStanje }).eq('id', izabraniArtikal.id);
-    
-    if (upError) return paziIPokreniObavestenje("Greška u bazi", "Greška prilikom čuvanja rezervacije.");
-
-    await supabase.from('istorija').insert([{
-      artikal: izabraniArtikal.naziv, tip: 'REZERVACIJA', kolicina: Number(kolicinaAkcija),
-      komentar: `Rezervisano za: ${konacniKupac} | ${komentar || 'Rezervacija robe'}`,
-      korisnik: korisnikEmail
-    }]);
-
-    setOtvorenModal(null); setKolicinaAkcija(1); setKomentar(''); setRezervacijaKupacId(''); setNoviRezKupacNaziv(''); setNoviRezKupacGrad('');
-    inicijalizujAplikaciju();
-  };
-
-  const izvrsiOtkazivanjeRezervacije = async (e) => {
-    e.preventDefault();
-    if (!izabraniArtikal || kolicinaAkcija <= 0 || !otkaziKlijentId) return alert("Popunite sva polja!");
-    
-    const trenutnoRezervisano = izabraniArtikal.rezervisano || 0;
-    if (Number(kolicinaAkcija) > trenutnoRezervisano) {
-      return paziIPokreniObavestenje("Greška", `Pokušavate da otkažete ${kolicinaAkcija} komada, ali artikal ima samo ${trenutnoRezervisano} aktivnih rezervacija.`);
-    }
-
-    const novoRezervisanoStanje = Math.max(0, trenutnoRezervisano - Number(kolicinaAkcija));
-    await supabase.from('oprema').update({ rezervisano: novoRezervisanoStanje }).eq('id', izabraniArtikal.id);
-
-    let klijentPrikaz = '';
-    const kom = komitenti.find(k => k.id == otkaziKlijentId);
-    klijentPrikaz = kom ? kom.naziv : 'Nepoznato';
-
-    await supabase.from('istorija').insert([{
-      artikal: izabraniArtikal.naziv, tip: 'OTKAZANA_REZERVACIJA', kolicina: Number(kolicinaAkcija),
-      komentar: `Klijent: ${klijentPrikaz} | ${komentar || 'Otkazivanje rezervacije'}`,
-      korisnik: korisnikEmail
-    }]);
-
-    setOtvorenModal(null); setKolicinaAkcija(1); setKomentar(''); setIzabraniArtikal(null); setOtkaziKlijentId('');
-    inicijalizujAplikaciju();
-  };
-
+  const dogodSkidanjeStavkeUlaza = () => setStavkeUlaza([...stavkeUlaza, { opremaId: oprema[0]?.id || '', kolicina: 1 }]);
   const dodajStavkuOtpremnice = () => setStavkeOtpremnice([...stavkeOtpremnice, { opremaId: oprema[0]?.id || '', kolicina: 1, poRezervaciji: false }]);
   const ukloniStavkuOtpremnice = (index) => setStavkeOtpremnice(stavkeOtpremnice.filter((_, i) => i !== index));
   const promeniStavkuOtpremnice = (index, polje, vrednost) => {
@@ -471,6 +394,7 @@ export default function Dashboard() {
       }
     }
 
+    // 📌 FIKSOVAN MAŠINSKI BAG SA TIPFELEROM OVDE
     const brOtpremnice = odrediSledeciBrojOtpremnice();
     const pripremljeneStavkeZaPdf = [];
 
@@ -497,66 +421,47 @@ export default function Dashboard() {
     inicijalizujAplikaciju();
   };
 
- // Pomoćna funkcija koja sprečava jsPDF da lomi tekst na našim slovima
-const izbaciKvacice = (tekst) => {
-  if (!tekst) return '';
-  return tekst
-    .replace(/č/g, 'c').replace(/Č/g, 'C')
-    .replace(/ć/g, 'c').replace(/Ć/g, 'C')
-    .replace(/š/g, 's').replace(/Š/g, 'S')
-    .replace(/ž/g, 'z').replace(/Ž/g, 'Z')
-    .replace(/đ/g, 'dj').replace(/Đ/g, 'Dj');
-};
+  const generisiPDFOtpremnicu = async (stavke, kupac, grad, predao, broj, datumObj = new Date()) => {
+    const doc = new jsPDF();
+    const dan = String(datumObj.getDate()).padStart(2, '0');
+    const mesec = String(datumObj.getMonth() + 1).padStart(2, '0');
+    const godina = datumObj.getFullYear();
 
-const generisiPDFOtpremnicu = async (stavke, kupac, grad, predao, broj, datumObj = new Date()) => {
-  const doc = new jsPDF();
-  const dan = String(datumObj.getDate()).padStart(2, '0');
-  const mesec = String(datumObj.getMonth() + 1).padStart(2, '0');
-  const godina = datumObj.getFullYear();
+    doc.setFont('Helvetica', 'normal'); doc.setFontSize(10);
+    doc.text("Montora Software d.o.o.", 14, 20); doc.text("Capital Plaza, Ul. Seika Zaida 13/L2-A06", 14, 25);
+    doc.text("81000 Podgorica, Crna Gora", 14, 30); doc.text("tel: +382 20 274 029, +382 20 274 030", 14, 35);
 
-  doc.setFont('Helvetica', 'normal'); doc.setFontSize(10);
-  doc.text("Montora Software d.o.o.", 14, 20); doc.text("Capital Plaza, Ul. Seika Zaida 13/L2-A06", 14, 25);
-  doc.text("81000 Podgorica, Crna Gora", 14, 30); doc.text("tel: +382 20 274 029, +382 20 274 030", 14, 35);
+    try { const logoBase64 = await urlToBase64('/montora-logo.png'); if (logoBase64) doc.addImage(logoBase64, 'PNG', 135, 12, 60, 15); } catch (e) { console.error(e); }
 
-  try { const logoBase64 = await urlToBase64('/montora-logo.png'); if (logoBase64) doc.addImage(logoBase64, 'PNG', 135, 12, 60, 15); } catch (e) { console.error(e); }
+    doc.setDrawColor(220, 225, 230); doc.line(14, 43, 196, 43);
+    doc.setFont('Helvetica', 'bold'); doc.text("Kupac / Primalac:", 14, 52);
+    doc.setFont('Helvetica', 'normal'); doc.text(izbaciKvacice(kupac), 14, 58); doc.text(izbaciKvacice(grad), 14, 63);
+    doc.setFont('Helvetica', 'bold'); doc.text(`Otpremnica br.: ${broj}`, 120, 52);
+    doc.setFont('Helvetica', 'normal'); doc.text(`Datum: ${dan}.${mesec}.${godina}. godine`, 120, 58);
 
-  doc.setDrawColor(220, 225, 230); doc.line(14, 43, 196, 43);
-  doc.setFont('Helvetica', 'bold'); doc.text("Kupac / Primalac:", 14, 52);
-  
-  // Čistimo i podatke o kupcu i gradu od kvačica radi sigurnosti layout-a
-  doc.setFont('Helvetica', 'normal'); 
-  doc.text(izbaciKvacice(kupac), 14, 58); 
-  doc.text(izbaciKvacice(grad), 14, 63);
-  
-  doc.setFont('Helvetica', 'bold'); doc.text(`Otpremnica br.: ${broj}`, 120, 52);
-  doc.setFont('Helvetica', 'normal'); doc.text(`Datum: ${dan}.${mesec}.${godina}. godine`, 120, 58);
+    const tabeleKolone = [["Red. Br.", "Opis robe / artikla", "Kol."]];
+    const tabelaRedovi = stavke.map((st, index) => [ 
+      `${index + 1}.`, 
+      izbaciKvacice(st.opis && st.opis !== '-' ? st.opis : st.naziv), 
+      st.kolicina.toString() 
+    ]);
 
-  const tabeleKolone = [["Red. Br.", "Opis robe / artikla", "Kol."]];
-  
-  // OVDJE UKLANJAMO KVAČICE - Tekst se privremeno pegla u "Matricni stampaci/termalni stampaci"
-  // i tabela se više nikada neće ružiti niti skakati u novi red bez razloga!
-  const tabelaRedovi = stavke.map((st, index) => [ 
-    `${index + 1}.`, 
-    izbaciKvacice(st.opis && st.opis !== '-' ? st.opis : st.naziv), 
-    st.kolicina.toString() 
-  ]);
+    autoTable(doc, {
+      startY: 72, head: tabeleKolone, body: tabelaRedovi, theme: 'grid',
+      headStyles: { fillColor: [240, 243, 246], textColor: [0, 0, 0], fontStyle: 'bold', lineWidth: 0.2, lineColor: [200, 200, 200] },
+      styles: { fontSize: 9, cellPadding: 4, textColor: [0, 0, 0], lineColor: [200, 200, 200] },
+      columnStyles: { 0: { cellWidth: 15, halign: 'center' }, 1: { cellWidth: 145 }, 2: { cellWidth: 20, halign: 'center', fontStyle: 'bold' } }
+    });
 
-  autoTable(doc, {
-    startY: 72, head: tabeleKolone, body: tabelaRedovi, theme: 'grid',
-    headStyles: { fillColor: [240, 243, 246], textColor: [0, 0, 0], fontStyle: 'bold', lineWidth: 0.2, lineColor: [200, 200, 200] },
-    styles: { fontSize: 9, cellPadding: 4, textColor: [0, 0, 0], lineColor: [200, 200, 200] },
-    columnStyles: { 0: { cellWidth: 15, halign: 'center' }, 1: { cellWidth: 145 }, 2: { cellWidth: 20, halign: 'center', fontStyle: 'bold' } }
-  });
+    const finalY = doc.lastAutoTable.finalY + 30;
+    doc.setFont('Helvetica', 'normal'); doc.text(`Za ${izbaciKvacice(kupac)}`, 14, finalY);
+    doc.setDrawColor(180, 180, 180); doc.line(14, finalY + 10, 80, finalY + 10); doc.text("(Primio/la)", 14, finalY + 14);
+    doc.setFontSize(10); doc.text("Za Montora software d.o.o.", 120, finalY);
+    doc.setFont('Helvetica', 'bold'); doc.text(izbaciKvacice(predao), 120, finalY + 6); 
+    doc.line(120, finalY + 10, 186, finalY + 10); doc.setFontSize(8); doc.text("(Predao/la)", 120, finalY + 14);
 
-  const finalY = doc.lastAutoTable.finalY + 30;
-  doc.setFont('Helvetica', 'normal'); doc.text(`Za ${izbaciKvacice(kupac)}`, 14, finalY);
-  doc.setDrawColor(180, 180, 180); doc.line(14, finalY + 10, 80, finalY + 10); doc.text("(Primio/la)", 14, finalY + 14);
-  doc.setFontSize(10); doc.text("Za Montora software d.o.o.", 120, finalY);
-  doc.setFont('Helvetica', 'bold'); doc.text(izbaciKvacice(predao), 120, finalY + 6); 
-  doc.line(120, finalY + 10, 186, finalY + 10); doc.setFontSize(8); doc.text("(Predao/la)", 120, finalY + 14);
-
-  doc.save(`Otpremnica_${broj.replace('/', '_')}.pdf`);
-};
+    doc.save(`Otpremnica_${broj.replace('/', '_')}.pdf`);
+  };
 
   const otvoriPregledOtpremnice = (log) => {
     const detalji = parsirajKomentarOtpremnice(log.komentar);
@@ -714,7 +619,7 @@ const generisiPDFOtpremnicu = async (stavke, kupac, grad, predao, broj, datumObj
             {/* SEKCIJA: IZVJEŠTAJI */}
             <div className="space-y-1">
               <p className="px-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Izvještaji</p>
-              <button onClick={preuzmiExcel} className="w-full flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium hover:bg-slate-800/30 hover:text-slate-200 transition-all">📊 Preuzmi izvještaj (Excel)</button>
+              {/* 📌 PREUZMI EXCEL JE UKLONJEN ODAVDE PREMA TVOM ZAHTJEVU */}
               <button onClick={() => setAktivniTab('izvjestaji')} className={`w-full flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium transition-all ${aktivniTab === 'izvjestaji' ? 'bg-slate-800 text-white font-semibold' : 'hover:bg-slate-800/30 hover:text-slate-200'}`}>📈 Statistika i Promet</button>
             </div>
 
@@ -755,6 +660,7 @@ const generisiPDFOtpremnicu = async (stavke, kupac, grad, predao, broj, datumObj
             
             {aktivniTab === 'zalihe' && (
               <>
+                {/* ČISTE KPI KARTICE UZ INFORMACIJU O POSLEDNJEM PROMETU */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
                   <div className="bg-white rounded-2xl p-5 border border-slate-200/70 shadow-sm flex justify-between items-center relative overflow-hidden group hover:border-blue-300 transition-all">
                     <div className="space-y-1 z-10">
@@ -807,8 +713,17 @@ const generisiPDFOtpremnicu = async (stavke, kupac, grad, predao, broj, datumObj
                       ))}
                     </select>
                   </div>
+
+                  {/* 📌 POVRATAK EXCEL DUGMETA NA DESNU STRANU KONTROLNE TRAKE PREMA ZAHTJEVU */}
+                  <div className="flex items-center gap-3 shrink-0">
+                    <button onClick={preuzmiExcel} className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-xl text-xs font-bold tracking-tight shadow-sm transition-all flex items-center gap-2">
+                      <svg className="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                      Preuzmi Izvještaj Excel
+                    </button>
+                  </div>
                 </div>
 
+                {/* TABELA BEZ SLIKA */}
                 <div className="bg-white border border-slate-200/70 rounded-2xl shadow-sm overflow-hidden flex flex-col">
                   <div className="overflow-x-auto">
                     <table className="w-full text-left border-collapse table-auto">
@@ -989,6 +904,7 @@ const generisiPDFOtpremnicu = async (stavke, kupac, grad, predao, broj, datumObj
                   <div className="space-y-3">
                     <div className="flex justify-between items-center mb-2">
                       <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Stavke prijema</h3>
+                      {/* 📌 ISPRAVLJENO: Vraćena ispravna sinkrona funkcija dodajStavkuUlaza */}
                       <button type="button" onClick={dodajStavkuUlaza} className="text-xs font-bold text-blue-600 hover:text-blue-700 bg-blue-50 px-3 py-1.5 rounded-lg transition-colors">+ Dodaj artikal</button>
                     </div>
                     <div className="space-y-3 max-h-[200px] overflow-y-auto pr-2 no-scrollbar">
@@ -1082,7 +998,7 @@ const generisiPDFOtpremnicu = async (stavke, kupac, grad, predao, broj, datumObj
               <form onSubmit={izvrsiOtkazivanjeRezervacije} className="space-y-4">
                   <div>
                     <label className="block text-xs font-bold text-slate-500 mb-1">Izaberi rezervisani artikal</label>
-                    <select required value={izabraniArtikal?.id || ''} className="w-full border border-slate-200 p-2.5 rounded-xl text-sm bg-white font-semibold text-slate-700 outline-none" onChange={(e) => setIzabraniArtikal(oprema.find(o => o.id == e.target.value))}>
+                    <select required value={izabraniArtikal?.id || ''} className="w-full border border-slate-200 p-2.5 rounded-xl text-sm bg-white font-semibold text-slate-700 outline-none" onChange={(e) => setIzabraniArtikal(oprema.filter(o => o.rezervisano > 0).find(o => o.id == e.target.value))}>
                       {oprema.filter(o => o.rezervisano > 0).length === 0 && <option value="">Nema rezervisanih artikala</option>}
                       {oprema.filter(o => o.rezervisano > 0).map(o => (
                         <option key={o.id} value={o.id}>{o.naziv} (Rezervisano: {o.rezervisano} kom)</option>
@@ -1102,10 +1018,10 @@ const generisiPDFOtpremnicu = async (stavke, kupac, grad, predao, broj, datumObj
                     <label className="block text-xs font-bold text-slate-500 mb-1">Količina za otkazivanje</label>
                     <input type="number" min="1" required value={kolicinaAkcija} onChange={e=>setKolicinaAkcija(e.target.value)} className="w-full border border-slate-300 p-2.5 rounded-xl text-sm font-bold text-slate-800" />
                   </div>
-                  <div><label className="block text-xs font-bold text-slate-500 mb-1">Razlog / Napomena</label><input placeholder="Npr. Klijent odustao" value={komentar} onChange={e=>setKomentar(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-xl text-sm font-medium outline-none" /></div>
+                  <div><label className="block text-xs font-bold text-slate-500 mb-1">Razlog / Napomena</label><input placeholder="Npr. Promjena porudžbine" value={komentar} onChange={e=>setKomentar(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-xl text-sm font-medium outline-none" /></div>
                   <div className="flex justify-end gap-3 pt-4 mt-2 border-t border-slate-100">
                       <button type="button" onClick={() => setOtvorenModal(null)} className="px-4 py-2 bg-slate-50 text-slate-600 rounded-xl text-sm font-medium hover:bg-slate-100">Odustani</button>
-                      <button type="submit" disabled={oprema.filter(o => o.rezervisano > 0).length === 0} className="px-4 py-2 bg-slate-900 hover:bg-slate-950 text-white disabled:bg-slate-300 rounded-lg text-sm font-bold">Ukloni rezervaciju</button>
+                      <button type="submit" disabled={oprema.filter(o => o.rezervisano > 0).length === 0} className="px-4 py-2 bg-slate-900 hover:bg-slate-950 text-white rounded-xl text-sm font-bold">Ukloni rezervaciju</button>
                   </div>
               </form>
           </div>
@@ -1123,7 +1039,7 @@ const generisiPDFOtpremnicu = async (stavke, kupac, grad, predao, broj, datumObj
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200">
                     <div className="md:col-span-2">
                       <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Kupac / Primalac *</label>
-                      <select required value={kupacId} onChange={(e) => setKupacId(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg text-sm bg-white font-semibold text-slate-700 outline-none">
+                      <select required value={kupacId} onChange={(e) => setCupacId(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg text-sm bg-white font-semibold text-slate-700 outline-none">
                         <option value="">Izaberi klijenta...</option>
                         {komitenti.filter(k => k.tip === 'Kupac' || k.tip === 'Oboje').map(k => (
                           <option key={k.id} value={k.id}>{k.naziv} ({k.grad || '-'})</option>
@@ -1290,40 +1206,6 @@ const generisiPDFOtpremnicu = async (stavke, kupac, grad, predao, broj, datumObj
         </div>
       )}
 
-      {/* MODAL: UREDI ARTIKAL */}
-      {otvorenModal === 'urediArtikal' && mozeDaPovlaciIUnosi && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm">
-          <div className="bg-white p-6 rounded-2xl shadow-xl w-full max-w-md border border-slate-100 animate-fade-in">
-              <h2 className="text-lg font-bold mb-5 text-slate-800 tracking-tight">Izmjena podataka o artiklu</h2>
-              <form onSubmit={azurirajArtikal} className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-500 mb-1">Artikal koji menjate</label>
-                    <select value={izabraniArtikal?.id || ''} onChange={(e) => handleIzaberiArtikalZaUredjivanje(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg text-sm bg-white text-slate-700 font-bold outline-none">
-                      {oprema.map(o => <option key={o.id} value={o.id}>{o.naziv} ({o.oznaka || 'Bez šifre'})</option>)}
-                    </select>
-                  </div>
-                  <div className="grid grid-cols-3 gap-2">
-                    <div className="col-span-2">
-                      <label className="block text-xs font-bold text-slate-500 mb-1">Naziv artikla *</label>
-                      <input required value={naziv} onChange={e=>setNaziv(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-xl outline-none text-sm font-bold text-slate-800" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-500 mb-1">PLU broj</label>
-                      <input type="number" value={plu} onChange={e=>setPlu(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-xl outline-none text-sm font-bold text-blue-600 text-center" />
-                    </div>
-                  </div>
-                  <div><label className="block text-xs font-bold text-slate-500 mb-1">Šifra / Oznaka</label><input value={oznaka} onChange={e=>setOznaka(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-xl text-sm font-mono text-slate-700" /></div>
-                  <div><label className="block text-xs font-bold text-slate-500 mb-1">Kategorija</label><input value={kategorija} onChange={e=>setKategorija(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-xl text-sm font-medium text-slate-700" /></div>
-                  <div><label className="block text-xs font-bold text-slate-500 mb-1">Opis / Specifikacija</label><textarea value={opis} onChange={e=>setOpis(e.target.value)} rows="3" className="w-full border border-slate-200 p-2.5 rounded-xl text-sm resize-none font-medium text-slate-600 leading-relaxed"></textarea></div>
-                  <div className="flex justify-end gap-3 pt-4 mt-2 border-t border-slate-100">
-                      <button type="button" onClick={() => { setOtvorenModal(null); setIzabraniArtikal(null); }} className="px-4 py-2 bg-slate-50 text-slate-600 rounded-xl text-sm font-medium hover:bg-slate-100">Odustani</button>
-                      <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold shadow-md">Sačuvaj promjene</button>
-                  </div>
-              </form>
-          </div>
-        </div>
-      )}
-
       {/* KONTROLNI PANEL ADMINISTRATORA */}
       {otvorenModal === 'podesavanja' && jeLiAdmin && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4 overflow-y-auto">
@@ -1339,7 +1221,7 @@ const generisiPDFOtpremnicu = async (stavke, kupac, grad, predao, broj, datumObj
             <div className="space-y-8 max-h-[70vh] overflow-y-auto pr-2 no-scrollbar">
               <div className="border border-slate-200 rounded-2xl p-5 bg-white space-y-4">
                 <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider border-b border-slate-100 pb-2">💼 Upravljanje bazom komitenata</h3>
-                <form onSubmit={dodajIliAzurirajKomitenta} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end bg-slate-50 p-3 rounded-xl border border-slate-200">
+                <form onSubmit={dogodiSeIzmenaKomitenta} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end bg-slate-50 p-3 rounded-xl border border-slate-200">
                   <div>
                     <label className="block text-[11px] font-bold text-slate-500 mb-1">Ime *</label>
                     <input required placeholder="Ime" value={adminKomitentNaziv} onChange={e=>setAdminKomitentNaziv(e.target.value)} className="w-full border border-slate-200 p-2 rounded-lg text-xs bg-white outline-none focus:border-blue-500 font-semibold" />
@@ -1454,7 +1336,7 @@ const generisiPDFOtpremnicu = async (stavke, kupac, grad, predao, broj, datumObj
 
       {/* PAMETNI MODAL: BRISANJE LOGA SA POVRATOM NA STANJE */}
       {otvorenModal === 'brisanjeLoga' && logZaBrisanje && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 backdrop-blur-md p-4 animate-fade-in">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 animate-fade-in">
           <div className="bg-white p-6 rounded-2xl shadow-2xl w-full max-w-md border border-slate-100">
             <h3 className="text-lg font-bold text-red-600 flex items-center gap-2">⚠️ Brisanje zapisa iz istorije</h3>
             <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl mt-4 mb-4">
