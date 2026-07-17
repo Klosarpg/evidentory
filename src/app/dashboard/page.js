@@ -714,7 +714,7 @@ const generisiPDFOtpremnicu = async (stavke, kupac, grad, predao, broj, datumObj
             {/* SEKCIJA: IZVJEŠTAJI */}
             <div className="space-y-1">
               <p className="px-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Izvještaji</p>
-              <button onClick={preuzmiExcel} className="w-full flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium hover:bg-slate-800/30 hover:text-slate-200 transition-all">📊 Izvještaji (Excel)</button>
+              <button onClick={preuzmiExcel} className="w-full flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium hover:bg-slate-800/30 hover:text-slate-200 transition-all">📊 Preuzmi izvještaj (Excel)</button>
               <button onClick={() => setAktivniTab('izvjestaji')} className={`w-full flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium transition-all ${aktivniTab === 'izvjestaji' ? 'bg-slate-800 text-white font-semibold' : 'hover:bg-slate-800/30 hover:text-slate-200'}`}>📈 Statistika i Promet</button>
             </div>
 
