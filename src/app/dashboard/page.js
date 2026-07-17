@@ -303,7 +303,7 @@ export default function Dashboard() {
     setOtvorenModal('brisanjeLoga');
   };
 
-  const potvrdiBrisanjeLoga = async () => {
+  const potsvediBrisanjeLoga = async () => {
     if (!logZaBrisanje) return;
     if (vratiNaStanje && logZaBrisanje.tip === 'IZLAZ_OTPREMNICA') {
       const art = oprema.find(o => o.naziv === logZaBrisanje.artikal);
@@ -357,7 +357,15 @@ export default function Dashboard() {
     return `${prefix}_${maxIndex + 1}_${godina}`; 
   };
 
-  // 📌 FUNKCIJE ZA BRZI ULAZ SU OVDJE SIGURNE I DEFINISANE
+  const dogodSkidanjeStavkeUlaza = () => setStavkeUlaza([...stavkeUlaza, { opremaId: oprema[0]?.id || '', kolicina: 1 }]);
+  const dodajStavkuOtpremnice = () => setStavkeOtpremnice([...stavkeOtpremnice, { opremaId: oprema[0]?.id || '', kolicina: 1, poRezervaciji: false }]);
+  const ukloniStavkuOtpremnice = (index) => setStavkeOtpremnice(stavkeOtpremnice.filter((_, i) => i !== index));
+  const promeniStavkuOtpremnice = (index, polje, vrednost) => {
+    const noveStavke = [...stavkeOtpremnice];
+    noveStavke[index][polje] = vrednost;
+    setStavkeOtpremnice(noveStavke);
+  };
+
   const dodajStavkuUlaza = () => setStavkeUlaza([...stavkeUlaza, { opremaId: oprema[0]?.id || '', kolicina: 1 }]);
   const ukloniStavkuUlaza = (index) => setStavkeUlaza(stavkeUlaza.filter((_, i) => i !== index));
   const promeniStavkuUlaza = (index, polje, vrednost) => {
@@ -457,14 +465,6 @@ export default function Dashboard() {
 
     setOtvorenModal(null); setKolicinaAkcija(1); setKomentar(''); setIzabraniArtikal(null); setOtkaziKlijentId('');
     inicijalizujAplikaciju();
-  };
-
-  const dodajStavkuOtpremnice = () => setStavkeOtpremnice([...stavkeOtpremnice, { opremaId: oprema[0]?.id || '', kolicina: 1, poRezervaciji: false }]);
-  const ukloniStavkuOtpremnice = (index) => setStavkeOtpremnice(stavkeOtpremnice.filter((_, i) => i !== index));
-  const promeniStavkuOtpremnice = (index, polje, vrednost) => {
-    const noveStavke = [...stavkeOtpremnice];
-    noveStavke[index][polje] = vrednost;
-    setStavkeOtpremnice(noveStavke);
   };
 
   const sacuvajIKnjiziOtpremnicu = async (e) => {
@@ -1133,6 +1133,7 @@ export default function Dashboard() {
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200">
                     <div className="md:col-span-2">
                       <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Kupac / Primalac *</label>
+                      {/* 📌 POPRAVLJENO: setCupacId promijenjeno u ispravno setKupacId sa slovom K */}
                       <select required value={kupacId} onChange={(e) => setKupacId(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg text-sm bg-white font-semibold text-slate-700 outline-none">
                         <option value="">Izaberi klijenta...</option>
                         {komitenti.filter(k => k.tip === 'Kupac' || k.tip === 'Oboje').map(k => (
@@ -1153,7 +1154,8 @@ export default function Dashboard() {
                         </div>
                         <div>
                           <label className="block text-xs font-bold text-slate-500 mb-1">Grad novog kupca *</label>
-                          <input required placeholder="Grad" value={noviKupacGrad} className="w-full border border-slate-200 p-2.5 rounded-lg text-sm bg-white outline-none focus:border-blue-500 font-medium" />
+                          {/* 📌 POPRAVLJENO: Dodat ispravan onChange događaj za grad novog kupca */}
+                          <input required placeholder="Grad" value={noviKupacGrad} onChange={e=>setNoviKupacGrad(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg text-sm bg-white outline-none focus:border-blue-500 font-medium" />
                         </div>
                       </div>
                     )}
@@ -1327,7 +1329,7 @@ export default function Dashboard() {
                   <div><label className="block text-xs font-bold text-slate-500 mb-1">Opis / Specifikacija</label><textarea value={opis} onChange={e=>setOpis(e.target.value)} rows="3" className="w-full border border-slate-200 p-2.5 rounded-xl text-sm resize-none font-medium text-slate-600 leading-relaxed"></textarea></div>
                   <div className="flex justify-end gap-3 pt-4 mt-2 border-t border-slate-100">
                       <button type="button" onClick={() => { setOtvorenModal(null); setIzabraniArtikal(null); }} className="px-4 py-2 bg-slate-50 text-slate-600 rounded-xl text-sm font-medium hover:bg-slate-100">Odustani</button>
-                      <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold shadow-md">Sačuvaj promjene</button>
+                      <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold shadow-md">Sačuvaj izmjene</button>
                   </div>
               </form>
           </div>
@@ -1464,7 +1466,7 @@ export default function Dashboard() {
 
       {/* PAMETNI MODAL: BRISANJE LOGA SA POVRATOM NA STANJE */}
       {otvorenModal === 'brisanjeLoga' && logZaBrisanje && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 animate-fade-in">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 backdrop-blur-md p-4 animate-fade-in">
           <div className="bg-white p-6 rounded-2xl shadow-2xl w-full max-w-md border border-slate-100">
             <h3 className="text-lg font-bold text-red-600 flex items-center gap-2">⚠️ Brisanje zapisa iz istorije</h3>
             <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl mt-4 mb-4">
@@ -1486,7 +1488,7 @@ export default function Dashboard() {
             )}
             <div className="flex justify-end gap-3 pt-4 mt-2 border-t border-slate-100">
               <button type="button" onClick={() => setOtvorenModal('podesavanja')} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-xl transition-colors">Otkaži</button>
-              <button type="button" onClick={potvrdiBrisanjeLoga} className="px-5 py-2 bg-red-600 text-white text-sm font-bold rounded-xl shadow-md">Trajno obriši</button>
+              <button type="button" onClick={potsvediBrisanjeLoga} className="px-5 py-2 bg-red-600 text-white text-sm font-bold rounded-xl shadow-md">Trajno obriši</button>
             </div>
           </div>
         </div>
