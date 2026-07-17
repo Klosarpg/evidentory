@@ -723,7 +723,7 @@ export default function Dashboard() {
           
           <div className="bg-white border-b border-slate-200/80 px-8 py-4 flex items-center justify-between z-10" onClick={(e) => e.stopPropagation()}>
             <div>
-              <h2 className="text-xl font-bold text-slate-900 tracking-tight">EVIDENTORY Zalihe</h2>
+              <h2 className="text-xl font-bold text-slate-900 tracking-tight">EVIDENTORY</h2>
               <p className="text-xs text-slate-400 mt-0.5">Pregled i upravljanje vašim inventarom</p>
             </div>
             <div className="flex items-center gap-4"></div>
