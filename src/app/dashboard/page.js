@@ -24,7 +24,7 @@ const urlToBase64 = async (url) => {
 };
 
 const parsirajKomentarOtpremnice = (komentar) => {
-  const regex = /Broj:\s*([^\s|]+)\s*\|\s*Kupac:\s*([^|]+)\s*\|\s*Grad:\s*([^|]+)\s*\|\s*Predao:\s*([^|]+)/;
+  const regex = /Broj:\s*([^\s|]+)\s*\|\s*Kupac:\s*([^|]+)\s*\|\s*Grad:\s*([^|]+)\s*\|\s*Predao:\s*(.+)/;
   const match = komentar?.match(regex);
   if (match) {
     return {
@@ -92,6 +92,8 @@ export default function Dashboard() {
   const [pregledOtpremnice, setPregledOtpremnice] = useState(null);
   const [potvrdaModal, setPotvrdaModal] = useState(null); 
 
+  const [otvoreneAkcijeId, setOtvoreneAkcijeId] = useState(null);
+
   const paziIPokreniObavestenje = (naslov, poruka) => {
     setPotvrdaModal({ naslov, poruka, samoObavestenje: true });
   };
@@ -148,6 +150,13 @@ export default function Dashboard() {
 
   const mozeDaPovlaciIUnosi = uloga === 'Admin' || uloga === 'Korisnik sa pravom povlacenja';
   const jeLiAdmin = uloga === 'Admin';
+
+  const dogodiSeIzmenaArtiklaUStavci = (index, opremaId) => {
+    const noveStavke = [...stavkeOtpremnice];
+    noveStavke[index].opremaId = opremaId;
+    noveStavke[index].poRezervaciji = false; 
+    setStavkeOtpremnice(noveStavke);
+  };
 
   const dohvatiAktivneRezervacije = (artikalNaziv, rezervisanoUkupno) => {
     if (!rezervisanoUkupno || rezervisanoUkupno <= 0) return [];
@@ -212,9 +221,9 @@ export default function Dashboard() {
     } else paziIPokreniObavestenje("Greška", error.message);
   };
 
-  const otvoriUrediArtikal = () => {
-    if (oprema.length === 0) return paziIPokreniObavestenje("Obaveštenje", "Baza je prazna!");
-    const pocetni = oprema[0];
+  const otvoriUrediArtikal = (art) => {
+    const pocetni = art || oprema[0];
+    if (!pocetni) return paziIPokreniObavestenje("Obaveštenje", "Baza je prazna!");
     setIzabraniArtikal(pocetni); setNaziv(pocetni.naziv || ''); setOznaka(pocetni.oznaka || '');
     setOpis(pocetni.opis || ''); setKategorija(pocetni.kategorija || 'Nekategorisano'); setPlu(pocetni.plu || '');
     setOtvorenModal('urediArtikal');
@@ -238,23 +247,15 @@ export default function Dashboard() {
     } else paziIPokreniObavestenje("Greška", "Greška pri ažuriranju: " + error.message);
   };
 
-  const otvoriObrisiArtikal = () => {
-    if (oprema.length === 0) return paziIPokreniObavestenje("Obaveštenje", "Baza je prazna!");
-    setArtikalZaBrisanjeId(oprema[0]?.id || '');
-    setOtvorenModal('obrisiArtikal');
-  };
-
-  const pokreniBrisanjeArtikla = () => {
-    if (!artikalZaBrisanjeId) return;
-    const art = oprema.find(o => o.id == artikalZaBrisanjeId);
+  const pokreniBrisanjeArtiklaDirektno = (art) => {
     if (!art) return;
     setPotvrdaModal({
       naslov: "Obriši artikal",
-      poruka: `Da li ste sigurni da želite trajno obrisati artikal "${art.naziv}" iz baze podataka?`,
+      poruka: `Da li ste sigurni da želite trajno obrisati artikal "${art.naziv}"?`,
       akcija: async () => {
-        const { error } = await supabase.from('oprema').delete().eq('id', artikalZaBrisanjeId);
-        if (!error) { setOtvorenModal(null); setArtikalZaBrisanjeId(''); inicijalizujAplikaciju(); } 
-        else paziIPokreniObavestenje("Greška", "Nije moguće obrisati artikal. Moguće je da je vezan za istoriju prometa.");
+        const { error } = await supabase.from('oprema').delete().eq('id', art.id);
+        if (!error) { inicijalizujAplikaciju(); } 
+        else paziIPokreniObavestenje("Greška", "Nije moguće obrisati artikal. Možda je vezan za istoriju prometa.");
         setPotvrdaModal(null);
       }
     });
@@ -294,12 +295,10 @@ export default function Dashboard() {
 
   const potvrdiBrisanjeLoga = async () => {
     if (!logZaBrisanje) return;
-
     if (vratiNaStanje && logZaBrisanje.tip === 'IZLAZ_OTPREMNICA') {
       const art = oprema.find(o => o.naziv === logZaBrisanje.artikal);
       if (art) await supabase.from('oprema').update({ kolicina: art.kolicina + logZaBrisanje.kolicina }).eq('id', art.id);
     }
-
     await supabase.from('istorija').delete().eq('id', logZaBrisanje.id);
     setOtvorenModal(null); setLogZaBrisanje(null); inicijalizujAplikaciju();
   };
@@ -310,11 +309,42 @@ export default function Dashboard() {
       poruka: "⚠️ PAŽNJA: Želite da obrišete CELU istoriju prometa. Ova akcija je nepovratna i vratiće statistiku u nulto stanje. Da li želite da nastavite?",
       akcija: async () => {
         const { error } = await supabase.from('istorija').delete().neq('id', 0);
-        if (!error) { paziIPokreniObavestenje("Uspješno očišćeno", "Istorija prometa je uspešno vraćena na nulu!"); inicijalizujAplikaciju(); } 
+        if (!error) { paziIPokreniObavestenje("Uspješno očišćeno", "Istorija prometa je uspešno vraćena na nulu!"); } 
         else paziIPokreniObavestenje("Greška", error.message);
         setPotvrdaModal(null);
       }
     });
+  };
+
+  const odrediSledeciBrojOtpremnice = () => {
+    const danas = new Date();
+    const dan = String(danas.getDate()).padStart(2, '0');
+    const mesec = String(danas.getMonth() + 1).padStart(2, '0');
+    const godina = danas.getFullYear();
+    const prefix = `${dan}${mesec}`;
+
+    const danasnjiLogovi = istorija.filter(log => {
+      if (log.tip !== 'IZLAZ_OTPREMNICA') return false;
+      const logDatum = new Date(log.created_at);
+      return logDatum.getDate() === danas.getDate() && logDatum.getMonth() === danas.getMonth() && logDatum.getFullYear() === danas.getFullYear();
+    });
+
+    const pronadjeniBrojevi = new Set();
+    danasnjiLogovi.forEach(log => {
+      const match = log.komentar?.match(/Broj:\s*([^\s|]+)/);
+      if (match) pronadjeniBrojevi.add(match[1]);
+    });
+
+    if (pronadjeniBrojevi.size === 0) return `${prefix}/${godina}`; 
+    let maxIndex = 1;
+    pronadjeniBrojevi.forEach(br => {
+      if (br.includes('_')) {
+        const delovi = br.split('_');
+        const idx = parseInt(delovi[1], 10);
+        if (!isNaN(idx) && idx > maxIndex) maxIndex = idx;
+      }
+    });
+    return `${prefix}_${maxIndex + 1}_${godina}`; 
   };
 
   const dodajStavkuUlaza = () => setStavkeUlaza([...stavkeUlaza, { opremaId: oprema[0]?.id || '', kolicina: 1 }]);
@@ -380,7 +410,7 @@ export default function Dashboard() {
     const novoRezervisanoStanje = trenutnoRezervisano + Number(kolicinaAkcija);
     const { error: upError } = await supabase.from('oprema').update({ rezervisano: novoRezervisanoStanje }).eq('id', izabraniArtikal.id);
     
-    if (upError) return paziIPokreniObavestenje("Greška u bazi", "Pritisnite RUN u SQL editoru prema uputstvu!");
+    if (upError) return paziIPokreniObavestenje("Greška u bazi", "Pritisnite RUN u SQL editoru!");
 
     await supabase.from('istorija').insert([{
       artikal: izabraniArtikal.naziv, tip: 'REZERVACIJA', kolicina: Number(kolicinaAkcija),
@@ -402,10 +432,7 @@ export default function Dashboard() {
     }
 
     const novoRezervisanoStanje = Math.max(0, trenutnoRezervisano - Number(kolicinaAkcija));
-    const { error: upError } = await supabase.from('oprema').update({ rezervisano: novoRezervisanoStanje }).eq('id', izabraniArtikal.id);
-    if (upError) {
-      return paziIPokreniObavestenje("Greška u bazi", "Dodajte kolonu 'rezervisano' u bazu prema uputstvu: " + upError.message);
-    }
+    await supabase.from('oprema').update({ rezervisano: novoRezervisanoStanje }).eq('id', izabraniArtikal.id);
 
     let klijentPrikaz = '';
     const kom = komitenti.find(k => k.id == otkaziKlijentId);
@@ -421,43 +448,6 @@ export default function Dashboard() {
     inicijalizujAplikaciju();
   };
 
-  const odrediSledeciBrojOtpremnice = () => {
-    const danas = new Date();
-    const dan = String(danas.getDate()).padStart(2, '0');
-    const mesec = String(danas.getMonth() + 1).padStart(2, '0');
-    const godina = danas.getFullYear();
-    const prefix = `${dan}${mesec}`;
-
-    const danasnjiLogovi = istorija.filter(log => {
-      if (log.tip !== 'IZLAZ_OTPREMNICA') return false;
-      const logDatum = new Date(log.created_at);
-      return logDatum.getDate() === danas.getDate() && logDatum.getMonth() === danas.getMonth() && logDatum.getFullYear() === danas.getFullYear();
-    });
-
-    const pronadjeniBrojevi = new Set();
-    danasnjiLogovi.forEach(log => {
-      const match = log.komentar?.match(/Broj:\s*([^\s|]+)/);
-      if (match) pronadjeniBrojevi.add(match[1]);
-    });
-
-    if (pronadjeniBrojevi.size === 0) return `${prefix}/${godina}`; 
-    let maxIndex = 1;
-    pronadjeniBrojevi.forEach(br => {
-      if (br.includes('_')) {
-        const delovi = br.split('_');
-        const idx = parseInt(delovi[1], 10);
-        if (!isNaN(idx) && idx > maxIndex) maxIndex = idx;
-      }
-    });
-    return `${prefix}_${maxIndex + 1}_${godina}`; 
-  };
-
-  const dogodiSeIzmenaArtiklaUStavci = (index, opremaId) => {
-    const noveStavke = [...stavkeOtpremnice];
-    noveStavke[index].opremaId = opremaId;
-    noveStavke[index].poRezervaciji = false; 
-    setStavkeOtpremnice(noveStavke);
-  };
   const dodajStavkuOtpremnice = () => setStavkeOtpremnice([...stavkeOtpremnice, { opremaId: oprema[0]?.id || '', kolicina: 1, poRezervaciji: false }]);
   const ukloniStavkuOtpremnice = (index) => setStavkeOtpremnice(stavkeOtpremnice.filter((_, i) => i !== index));
   const promeniStavkuOtpremnice = (index, polje, vrednost) => {
@@ -507,11 +497,7 @@ export default function Dashboard() {
       const standardniKomentar = `Broj: ${brOtpremnice} | Kupac: ${konacniKupacNaziv} | Grad: ${konacniKupacGrad} | Predao: ${predaoIme} | Režim: ${rezimTekst}`;
 
       await supabase.from('oprema').update({ kolicina: novaKolicina, rezervisano: noviRezervisano }).eq('id', artikalUBazi.id);
-      await supabase.from('istorija').insert([{ 
-        artikal: artikalUBazi.naziv, tip: 'IZLAZ_OTPREMNICA', kolicina: Number(stavka.kolicina), 
-        komentar: standardniKomentar,
-        korisnik: korisnikEmail
-      }]);
+      await supabase.from('istorija').insert([{ artikal: artikalUBazi.naziv, tip: 'IZLAZ_OTPREMNICA', kolicina: Number(stavka.kolicina), komentar: standardniKomentar, korisnik: korisnikEmail }]);
 
       pripremljeneStavkeZaPdf.push({ naziv: artikalUBazi.naziv, oznaka: artikalUBazi.oznaka || '-', opis: artikalUBazi.opis || '-', kolicina: stavka.kolicina });
     }
@@ -542,7 +528,7 @@ export default function Dashboard() {
     doc.setFont('Helvetica', 'normal'); doc.text(`Datum: ${dan}.${mesec}.${godina}. godine`, 120, 58);
 
     const tabeleKolone = [["Red. Br.", "Opis robe / artikla", "Kol."]];
-    const tabelaRedovi = stavke.map((st, index) => [ `${index + 1}.`, st.opis !== '-' && st.opis ? st.opis : st.naziv, st.kolicina.toString() ]);
+    const tabelaRedovi = stavke.map((st, index) => [ `${index + 1}.`, st.opis !== '-' && st.opis ? st.naziv : st.naziv, st.kolicina.toString() ]);
 
     autoTable(doc, {
       startY: 72, head: tabeleKolone, body: tabelaRedovi, theme: 'grid',
@@ -561,17 +547,6 @@ export default function Dashboard() {
     doc.save(`Otpremnica_${broj.replace('/', '_')}.pdf`);
   };
 
-  const otvoriPregledOtpremnice = (log) => {
-    const detalji = parsirajKomentarOtpremnice(log.komentar);
-    if (!detalji) return paziIPokreniObavestenje("Greška", "Nije moguće učitati detalje ove otpremnice.");
-    const srodniLogovi = istorija.filter(l => l.tip === 'IZLAZ_OTPREMNICA' && l.komentar?.includes(`Broj: ${detalji.broj}`));
-    const rekonstruisaneStavke = srodniLogovi.map(l => {
-      const artikalUBazi = oprema.find(o => o.naziv === l.artikal);
-      return { naziv: l.artikal, oznaka: artikalUBazi?.oznaka || '-', opis: artikalUBazi?.opis || '-', kolicina: l.kolicina };
-    });
-    setPregledOtpremnice({ broj: detalji.broj, kupac: detalji.kupac, grad: detalji.grad, predao: detalji.predao, datum: new Date(log.created_at).toLocaleDateString('sr-RS'), datumObj: new Date(log.created_at), stavke: rekonstruisaneStavke });
-  };
-
   const preuzmiExcel = async () => {
     if (oprema.length === 0) return paziIPokreniObavestenje("Obaveštenje", "Nema podataka za eksport!");
     const workbook = new ExcelJS.Workbook();
@@ -581,18 +556,18 @@ export default function Dashboard() {
     const tankiBorder = { top: { style: 'thin', color: { argb: 'FFD9D9D9' } }, left: { style: 'thin', color: { argb: 'FFD9D9D9' } }, bottom: { style: 'thin', color: { argb: 'FFD9D9D9' } }, right: { style: 'thin', color: { argb: 'FFD9D9D9' } } };
 
     worksheet.mergeCells('A1:E1');
-    const naslovnaCelija = worksheet.getCell('A1');
-    naslovnaCelija.value = 'IZVJEŠTAJ STANJA NA ZALIHAMA (SA REZERVACIJAMA)';
-    naslovnaCelija.font = { name: 'Arial', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
-    naslovnaCelija.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F497D' } }; 
-    naslovnaCelija.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+    worksheet.getCell('A1').value = 'IZVJEŠTAJ STANJA NA ZALIHAMA (SA REZERVACIJAMA)';
+    worksheet.getCell('A1').font = { name: 'Arial', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
+    worksheet.getCell('A1').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F497D' } }; 
+    worksheet.getCell('A1').alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
     worksheet.getRow(1).height = 40;
     worksheet.getRow(2).height = 15;
 
     const koloneNazivi = ['Naziv Artikla', 'Oznaka', 'Opis', 'Količina na Stanju', 'Rezervisano'];
-    const zaglavljeRed = worksheet.getRow(3); zaglavljeRed.height = 25;
+    worksheet.getRow(3).height = 25;
     koloneNazivi.forEach((naziv, indeks) => {
-      const celija = zaglavljeRed.getCell(indeks + 1); celija.value = naziv;
+      const celija = worksheet.getRow(3).getCell(indeks + 1); 
+      celija.value = naziv;
       celija.font = { name: 'Arial', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
       celija.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF366092' } }; 
       celija.alignment = { vertical: 'middle', horizontal: indeks >= 3 ? 'right' : 'left', indent: indeks < 3 ? 1 : 0 };
@@ -600,30 +575,30 @@ export default function Dashboard() {
     });
 
     const sveKategorije = [...new Set(oprema.map(item => item.kategorija || 'Nekategorisano'))].sort();
-    let trenutniRedIdx = 4;
+    let trenchesRedIdx = 4;
 
     sveKategorije.forEach((kat, katIdx) => {
-      if (katIdx > 0) { worksheet.getRow(trenutniRedIdx).height = 15; trenutniRedIdx++; }
-      const katRed = worksheet.getRow(trenutniRedIdx); katRed.height = 25; worksheet.mergeCells(`A${trenutniRedIdx}:E${trenutniRedIdx}`);
-      const katCelija = katRed.getCell(1); katCelija.value = ` KATEGORIJA: ${kat}`;
+      if (katIdx > 0) { worksheet.getRow(trenchesRedIdx).height = 15; trenchesRedIdx++; }
+      worksheet.mergeCells(`A${trenchesRedIdx}:E${trenchesRedIdx}`);
+      const katCelija = worksheet.getRow(trenchesRedIdx).getCell(1); katCelija.value = ` KATEGORIJA: ${kat}`;
       katCelija.font = { name: 'Arial', size: 11, bold: true, color: { argb: 'FF1F497D' } }; 
       katCelija.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE9EDF4' } }; 
       katCelija.alignment = { vertical: 'middle', horizontal: 'left' };
-      for (let c = 1; c <= 5; c++) katRed.getCell(c).border = tankiBorder;
-      trenutniRedIdx++;
+      for (let c = 1; c <= 5; c++) worksheet.getRow(trenchesRedIdx).getCell(c).border = tankiBorder;
+      trenchesRedIdx++;
 
       const artikliUKategoriji = oprema.filter(item => (item.kategorija || 'Nekategorisano') === kat);
       artikliUKategoriji.sort((a, b) => (a.plu || 0) - (b.plu || 0));
 
       artikliUKategoriji.forEach(artikal => {
-        const red = worksheet.getRow(trenutniRedIdx); red.height = 20;
+        const red = worksheet.getRow(trenchesRedIdx); red.height = 20;
         red.getCell(1).value = `   ${artikal.naziv}`; red.getCell(2).value = artikal.oznaka || ''; red.getCell(3).value = artikal.opis || '';
         red.getCell(4).value = Number(artikal.kolicina); red.getCell(5).value = Number(artikal.rezervisano || 0);
         for (let c = 1; c <= 5; c++) {
           red.getCell(c).font = { name: 'Arial', size: 10 }; red.getCell(c).border = tankiBorder;
           red.getCell(c).alignment = { vertical: 'middle', horizontal: c >= 4 ? 'right' : 'left' };
         }
-        trenutniRedIdx++;
+        trenchesRedIdx++;
       });
     });
 
@@ -633,7 +608,24 @@ export default function Dashboard() {
     const a = document.createElement('a'); a.href = url; a.download = `Evidentory_Stanje_Zaliha_${new Date().toLocaleDateString('sr-RS')}.xlsx`; a.click();
   };
 
+  const formatirajDatumIVrijeme = (log) => {
+    if (!log) return { datum: 'Nema zapisa', vrijeme: '' };
+    const d = new Date(log.created_at);
+    return {
+      datum: d.toLocaleDateString('sr-RS', { day: '2-digit', month: '2-digit', year: 'numeric' }),
+      vrijeme: d.toLocaleTimeString('sr-RS', { hour: '2-digit', minute: '2-digit' })
+    };
+  };
+
+  const zadnjiUlazLog = istorija.find(log => log.tip === 'BRZI_ULAZ' || log.tip.includes('ULAZ'));
+  const zadnjiIzlazLog = istorija.find(log => log.tip === 'IZLAZ_OTPREMNICA');
+  const zadnjiUlaz = formatirajDatumIVrijeme(zadnjiUlazLog);
+  const zadnjiIzlaz = formatirajDatumIVrijeme(zadnjiIzlazLog);
+
+  const ukupnoNaStanju = oprema.reduce((sum, item) => sum + item.kolicina, 0);
+  const jedinstvenihProizvoda = oprema.length;
   const sortiranaOprema = [...oprema].sort((a, b) => (a.plu || 0) - (b.plu || 0));
+
   const filtriranaOprema = sortiranaOprema.filter(item => {
     const odgovaraPretrazi = item.naziv.toLowerCase().includes(pretraga.toLowerCase()) || (item.oznaka && item.oznaka.toLowerCase().includes(pretraga.toLowerCase()));
     const odgovaraKategoriji = izabranaKategorija === 'Sve' || (item.kategorija || 'Nekategorisano') === izabranaKategorija;
@@ -649,272 +641,321 @@ export default function Dashboard() {
         .no-scrollbar { -ms-overflow-style: none !important; scrollbar-width: none !important; }
       `}} />
 
-      <div className="flex h-screen bg-[#f3f4f6] font-sans overflow-hidden">
+      <div className="flex h-screen bg-[#F8FAFC] font-sans overflow-hidden text-slate-800" onClick={() => setOtvoreneAkcijeId(null)}>
         
-        <div className="w-[260px] bg-[#0F172A] text-slate-300 flex flex-col shadow-2xl z-10 shrink-0">
-          <div className="p-6 border-b border-slate-700/50">
+        {/* ================= SIDEBAR LIJEVO ================= */}
+        <div className="w-[260px] bg-[#0F172A] text-slate-300 flex flex-col shadow-2xl z-20 shrink-0" onClick={(e) => e.stopPropagation()}>
+          <div className="p-6 flex items-center gap-3 border-b border-slate-700/50">
+            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-black shadow-md shadow-blue-900/50">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" /></svg>
+            </div>
             <h1 className="text-xl font-bold text-white tracking-wide">EVIDENTORY</h1>
           </div>
-          <div className="flex-1 overflow-y-auto p-4 space-y-2 no-scrollbar">
-            <button onClick={() => setAktivniTab('zalihe')} className={`w-full text-left px-4 py-3 rounded-xl font-medium transition-all text-sm ${aktivniTab === 'zalihe' ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/50' : 'hover:bg-slate-800/50 hover:text-white'}`}>Pregled Zaliha</button>
-            {aktivniTab === 'zalihe' && (
-              <div className="mt-2 pl-2 pt-2 pb-4 border-t border-slate-800/60 space-y-1">
-                <p className="px-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Filter kategorija</p>
-                <button onClick={() => setIzabranaKategorija('Sve')} className={`w-full text-left px-3 py-2 rounded-xl text-xs font-semibold transition-all flex items-center gap-2 ${izabranaKategorija === 'Sve' ? 'bg-slate-800 text-white border-l-4 border-blue-500 pl-2 shadow-inner' : 'text-slate-400 hover:bg-slate-800/30 hover:text-slate-200'}`}>📁 Prikaži sve artikle</button>
+          
+          <div className="flex-1 overflow-y-auto p-4 space-y-6 no-scrollbar">
+            {/* SEKCIJA: INVENTAR */}
+            <div className="space-y-1">
+              <p className="px-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Inventar</p>
+              
+              <button onClick={() => { setAktivniTab('zalihe'); setIzabranaKategorija('Sve'); }} className={`w-full text-left px-4 py-2 rounded-xl text-xs font-semibold transition-all ${izabranaKategorija === 'Sve' && aktivniTab === 'zalihe' ? 'text-white bg-slate-800/50' : 'hover:bg-slate-800/30 hover:text-slate-200'}`}>
+                📦 Prikaži sve artikle
+              </button>
+
+              <div className="pt-1 pl-3 pb-3 space-y-0.5 border-l border-slate-800/40 ml-4">
                 {[...new Set(oprema.map(item => item.kategorija || 'Nekategorisano'))].sort().map(kat => (
-                  <button key={kat} onClick={() => setIzabranaKategorija(kat)} className={`w-full text-left px-3 py-2 rounded-xl text-xs font-medium transition-all truncate block ${izabranaKategorija === kat ? 'bg-slate-800 text-white border-l-4 border-blue-500 pl-2 shadow-inner' : 'text-slate-400 hover:bg-slate-800/30 hover:text-slate-200'}`} title={kat}>▪️ {kat}</button>
+                  <button key={kat} onClick={() => { setAktivniTab('zalihe'); setIzabranaKategorija(kat); }} className={`w-full text-left px-3 py-1 rounded-lg text-[11px] font-medium transition-all truncate block ${izabranaKategorija === kat && aktivniTab === 'zalihe' ? 'bg-slate-800 text-blue-400 font-semibold' : 'text-slate-500 hover:text-slate-300'}`}>▪️ {kat}</button>
                 ))}
               </div>
-            )}
-            <button onClick={() => setAktivniTab('izvjestaji')} className={`w-full text-left px-4 py-3 rounded-xl font-medium transition-all text-sm ${aktivniTab === 'izvjestaji' ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/50' : 'hover:bg-slate-800/50 hover:text-white'}`}>Statistika i Promet</button>
+
+              {mozeDaPovlaciIUnosi && (
+                <>
+                  <button onClick={() => { setOtvorenModal('brziUlaz'); setStavkeUlaza([{ opremaId: oprema[0]?.id || '', kolicina: 1 }]); }} className="w-full flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium hover:bg-slate-800/30 hover:text-slate-200 transition-all">📤 Prijem (Ulaz)</button>
+                  <button onClick={() => { setOtvorenModal('otpremnica'); setStavkeOtpremnice([{ opremaId: oprema[0]?.id || '', kolicina: 1, poRezervaciji: false }]); }} className="w-full flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium hover:bg-slate-800/30 hover:text-slate-200 transition-all">📥 Otpremnica (Izlaz)</button>
+                  <button onClick={() => { setOtvorenModal('novaRezervacija'); setKolicinaAkcija(1); if (oprema.length > 0) setIzabraniArtikal(oprema[0]); }} className="w-full flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium hover:bg-slate-800/30 hover:text-slate-200 transition-all">🔖 Rezervacije</button>
+                  <button onClick={() => {
+                    const stavkeSaRez = oprema.filter(o => o.rezervisano > 0);
+                    if (stavkeSaRez.length > 0) {
+                      setIzabraniArtikal(stavkeSaRez[0]);
+                      setOtvorenModal('otkaziRezervaciju'); setKolicinaAkcija(1);
+                    } else { paziIPokreniObavestenje("Nema rezervacija", "Trenutno nema aktivnih rezervacija u sistemu."); }
+                  }} className="w-full flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium hover:bg-slate-800/30 hover:text-slate-200 transition-all">🔓 Otkaži rezervaciju</button>
+                </>
+              )}
+
+              {jeLiAdmin && (
+                <button onClick={() => setOtvorenModal('noviArtikal')} className="w-full flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-blue-400 hover:bg-blue-600/10 transition-all mt-2 border border-blue-500/20">
+                  ➕ Dodaj artikal
+                </button>
+              )}
+            </div>
+
+            {/* SEKCIJA: IZVJEŠTAJI */}
+            <div className="space-y-1">
+              <p className="px-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Izvještaji</p>
+              <button onClick={preuzmiExcel} className="w-full flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium hover:bg-slate-800/30 hover:text-slate-200 transition-all">📊 Izvještaji (Excel)</button>
+              <button onClick={() => setAktivniTab('izvjestaji')} className={`w-full flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium transition-all ${aktivniTab === 'izvjestaji' ? 'bg-slate-800 text-white font-semibold' : 'hover:bg-slate-800/30 hover:text-slate-200'}`}>📈 Statistika i Promet</button>
+            </div>
+
+            {/* SEKCIJA: PODEŠAVANJA */}
             {jeLiAdmin && (
-              <div className="mt-6 pt-4 border-t border-slate-700/50">
-                <p className="px-4 text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Baza</p>
-                <button onClick={() => setOtvorenModal('noviArtikal')} className="w-full text-left px-4 py-2.5 rounded-lg text-sm transition-all hover:bg-slate-800 hover:text-white">Novi artikal</button>
-                <button onClick={otvoriUrediArtikal} className="w-full text-left px-4 py-2.5 rounded-lg text-sm transition-all hover:bg-slate-800 hover:text-white">Uredi artikal</button>
-                <button onClick={otvoriObrisiArtikal} className="w-full text-left px-4 py-2.5 rounded-lg text-sm transition-all hover:bg-red-500/10 text-red-400 hover:text-red-300">Obriši artikal</button>
+              <div className="space-y-1">
+                <p className="px-4 text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Podešavanja</p>
+                <button onClick={() => setOtvorenModal('podesavanja')} className="w-full flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium hover:bg-slate-800/30 hover:text-slate-200 transition-all">⚙️ Kontrolni Panel</button>
               </div>
             )}
           </div>
-          <div className="p-4 bg-slate-900/50 border-t border-slate-800">
-             <div className="text-xs text-slate-500 mb-3 px-2 truncate">{korisnikEmail}</div>
-             <button onClick={handleLogout} className="w-full py-2.5 rounded-lg text-sm font-medium border border-slate-700 text-slate-300 hover:bg-slate-800 transition-all">Odjavi se</button>
+
+          <div className="p-4 bg-[#090D1A] border-t border-slate-800/40 flex items-center justify-between">
+            <div className="flex items-center gap-3 truncate">
+              <div className="w-9 h-9 bg-slate-800 text-white font-bold rounded-xl flex items-center justify-center uppercase select-none shrink-0 border border-slate-700">{korisnikEmail ? korisnikEmail.substring(0, 2) : 'U'}</div>
+              <div className="truncate">
+                <p className="text-xs font-bold text-white capitalize">{korisnikEmail || 'Korisnik'}</p>
+              </div>
+            </div>
+            <button onClick={handleLogout} className="text-slate-500 hover:text-red-400 p-1 rounded-lg transition-colors" title="Odjavi se">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
+            </button>
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-8">
-          <div className="max-w-6xl mx-auto space-y-6">
+        {/* ================= GLAVNI DESNI PANEL ================= */}
+        <div className="flex-1 flex flex-col overflow-hidden">
+          
+          <div className="bg-white border-b border-slate-200/80 px-8 py-4 flex items-center justify-between z-10" onClick={(e) => e.stopPropagation()}>
+            <div>
+              <h2 className="text-xl font-bold text-slate-900 tracking-tight">EVIDENTORY Zalihe</h2>
+              <p className="text-xs text-slate-400 mt-0.5">Pregled i upravljanje vašim inventarom</p>
+            </div>
+            <div className="flex items-center gap-4"></div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-8 space-y-6 no-scrollbar" onClick={(e) => e.stopPropagation()}>
             
             {aktivniTab === 'zalihe' && (
               <>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                  <div className="bg-white rounded-xl py-3.5 px-5 shadow-[0_2px_8px_-3px_rgba(6,81,237,0.05)] border border-slate-200/60 flex items-center justify-between">
-                    <div><p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Ukupno na stanju</p><h3 className="text-2xl font-black text-slate-800 mt-0.5">{oprema.reduce((sum, item) => sum + item.kolicina, 0)}</h3></div>
+                {/* 📌 UBAČENE 4 PRELIJEPE KARTICE UKLJUČUJUĆI I VRIJEME ZADNJEG AŽURIRANJA */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+                  <div className="bg-white rounded-2xl p-5 border border-slate-200/70 shadow-sm flex justify-between items-center relative overflow-hidden group hover:border-blue-300 transition-all">
+                    <div className="space-y-1 z-10">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Ukupno artikala</p>
+                      <h3 className="text-2xl font-black text-slate-900">{ukupnoNaStanju}</h3>
+                    </div>
+                    <div className="w-16 h-12 opacity-30 select-none pointer-events-none text-blue-500 flex items-center justify-end">
+                      <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" /></svg>
+                    </div>
                   </div>
-                  <div className="bg-white rounded-xl py-3.5 px-5 shadow-[0_2px_8px_-3px_rgba(6,81,237,0.05)] border border-slate-200/60 flex items-center justify-between">
-                    <div><p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Jedinstvenih artikala</p><h3 className="text-2xl font-black text-slate-800 mt-0.5">{oprema.length}</h3></div>
+
+                  <div className="bg-white rounded-2xl p-5 border border-slate-200/70 shadow-sm flex justify-between items-center relative overflow-hidden group hover:border-blue-300 transition-all">
+                    <div className="space-y-1 z-10">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Jedinstvenih proizvoda</p>
+                      <h3 className="text-2xl font-black text-slate-900">{jedinstvenihProizvoda}</h3>
+                    </div>
+                    <div className="w-16 h-12 opacity-30 select-none pointer-events-none text-blue-500 flex items-center justify-end">
+                      <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" /></svg>
+                    </div>
                   </div>
-                  <div className="bg-white rounded-xl py-3.5 px-5 shadow-[0_2px_8px_-3px_rgba(6,81,237,0.05)] border border-slate-200/60 flex flex-col justify-center">
-                    <button onClick={preuzmiExcel} className="w-full bg-emerald-50 border border-emerald-200 hover:bg-emerald-100/80 text-emerald-700 py-2 rounded-lg text-xs font-bold transition-all active:scale-[0.98] flex items-center justify-center gap-1.5 shadow-sm shadow-emerald-100">📗 Preuzmi stanje (Excel)</button>
+
+                  <div className="bg-white rounded-2xl p-5 border border-slate-200/70 shadow-sm flex justify-between items-center relative overflow-hidden group hover:border-emerald-300 transition-all">
+                    <div className="space-y-1 z-10">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Zadnji Prijem (Ulaz)</p>
+                      <h3 className="text-xl font-black text-slate-900">{zadnjiUlaz.datum}</h3>
+                      <p className="text-[11px] font-bold text-emerald-600 mt-1 flex items-center gap-1">
+                        ⏱️ {zadnjiUlaz.vrijeme ? `Ažurirano: ${zadnjiUlaz.vrijeme} h` : 'Nema prometa'}
+                      </p>
+                    </div>
+                    <div className="w-16 h-12 opacity-20 select-none pointer-events-none text-emerald-500 flex items-center justify-end">
+                      <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4 4m0 0l-4-4m4 4V4" /></svg>
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-2xl p-5 border border-slate-200/70 shadow-sm flex justify-between items-center relative overflow-hidden group hover:border-rose-300 transition-all">
+                    <div className="space-y-1 z-10">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Zadnji Otpis (Izlaz)</p>
+                      <h3 className="text-xl font-black text-slate-900">{zadnjiIzlaz.datum}</h3>
+                      <p className="text-[11px] font-bold text-rose-500 mt-1 flex items-center gap-1">
+                        ⏱️ {zadnjiIzlaz.vrijeme ? `Ažurirano: ${zadnjiIzlaz.vrijeme} h` : 'Nema prometa'}
+                      </p>
+                    </div>
+                    <div className="w-16 h-12 opacity-20 select-none pointer-events-none text-rose-500 flex items-center justify-end">
+                      <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4-4m0 0L8 12m4-4v12" /></svg>
+                    </div>
                   </div>
                 </div>
 
-                <div className="bg-white rounded-2xl shadow-[0_2px_10px_-3px_rgba(6,81,237,0.1)] border border-slate-100 overflow-hidden flex flex-col">
-                  <div className="p-6 border-b border-slate-100 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 bg-white">
-                    <div className="w-full lg:w-72 shrink-0">
-                      <input type="text" placeholder="Pretraži inventar..." className="w-full bg-slate-50 border border-slate-200 px-4 py-2.5 rounded-lg text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" value={pretraga} onChange={(e) => setPretraga(e.target.value)} />
+                <div className="bg-white p-4 border border-slate-200/70 rounded-2xl shadow-sm flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
+                  <div className="flex flex-wrap items-center gap-3 flex-1">
+                    <div className="relative flex-1 max-w-xs">
+                      <span className="absolute inset-y-0 left-3 flex items-center text-slate-400 pointer-events-none">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                      </span>
+                      <input type="text" placeholder="Pretraži inventar..." className="w-full bg-slate-50 border border-slate-200 pl-9 pr-10 py-2 rounded-xl text-xs font-medium outline-none focus:bg-white focus:border-blue-500 text-slate-800" value={pretraga} onChange={(e) => setPretraga(e.target.value)} />
                     </div>
-                    
-                    {mozeDaPovlaciIUnosi && (
-                      <div className="flex-1 flex flex-col sm:flex-row items-center justify-between w-full lg:pl-4 gap-4 sm:gap-0">
-                        <div className="flex gap-2 w-full sm:w-auto">
-                          <button onClick={() => { setOtvorenModal('brziUlaz'); setStavkeUlaza([{ opremaId: oprema[0]?.id || '', kolicina: 1 }]); }} className="flex-1 sm:flex-none bg-slate-800 text-white px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-slate-900 transition-all shadow-md">Prijem (Ulaz)</button>
-                          <button onClick={() => { setOtvorenModal('otpremnica'); setStavkeOtpremnice([{ opremaId: oprema[0]?.id || '', kolicina: 1, poRezervaciji: false }]); }} className="flex-1 sm:flex-none bg-blue-600 text-white px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700 transition-all shadow-md shadow-blue-200">Otpremnica (Izlaz)</button>
-                        </div>
-                        <div className="flex gap-2 w-full sm:w-auto sm:justify-end">
-                          <button onClick={() => { setOtvorenModal('novaRezervacija'); setKolicinaAkcija(1); if (oprema.length > 0) setIzabraniArtikal(oprema[0]); }} className="flex-1 sm:flex-none bg-amber-500 text-white px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-amber-600 transition-all shadow-md shadow-amber-100">📌 Rezerviši</button>
-                          <button onClick={() => {
-                            const stavkeSaRez = oprema.filter(o => o.rezervisano > 0);
-                            if (stavkeSaRez.length > 0) {
-                              setIzabraniArtikal(stavkeSaRez[0]);
-                              setOtvorenModal('otkaziRezervaciju'); setKolicinaAkcija(1);
-                            } else { paziIPokreniObavestenje("Nema rezervacija", "Trenutno nema aktivnih rezervacija u sistemu."); }
-                          }} className="flex-1 sm:flex-none bg-amber-50 text-amber-700 border border-amber-500 px-5 py-2.5 rounded-lg text-sm font-bold hover:bg-amber-100 transition-all shadow-sm">✕ Otkaži rezervaciju</button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
 
+                    <select value={izabranaKategorija} onChange={(e) => setIzabranaKategorija(e.target.value)} className="bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl text-xs font-semibold text-slate-600 outline-none hover:bg-slate-100/70 transition-all cursor-pointer">
+                      <option value="Sve">Kategorija: Sve</option>
+                      {[...new Set(oprema.map(item => item.kategorija || 'Nekategorisano'))].map(kat => (
+                        <option key={kat} value={kat}>{kat}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* TABELA BEZ SLIKA */}
+                <div className="bg-white border border-slate-200/70 rounded-2xl shadow-sm overflow-hidden flex flex-col">
                   <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse">
-                      <thead className="bg-white border-b border-slate-100">
-                        <tr>
-                          <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider w-16 text-center">PLU</th>
-                          <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">Šifra</th>
-                          <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">Naziv artikla</th>
-                          <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">Kategorija</th>
-                          <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider text-right">Stanje</th>
-                          <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider text-right w-32">Rezervisano</th>
+                    <table className="w-full text-left border-collapse table-auto">
+                      <thead>
+                        <tr className="bg-slate-50/70 border-b border-slate-200 text-slate-400 font-bold uppercase text-[10px] tracking-widest select-none">
+                          <th className="px-6 py-4 text-center w-16">PLU</th>
+                          <th className="px-6 py-4 w-32">Šifra</th>
+                          <th className="px-6 py-4">Naziv artikla</th>
+                          <th className="px-6 py-4 w-36">Kategorija</th>
+                          <th className="px-6 py-4 w-40">Stanje</th>
+                          <th className="px-6 py-4 text-center w-28">Rezervisano</th>
+                          <th className="px-6 py-4 text-center w-20">Akcije</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-50">
-                        {filtriranaOprema.map((item) => (
-                          <tr key={item.id} className="hover:bg-slate-50/50 transition-colors">
-                            <td className="px-6 py-4 text-sm font-bold text-blue-600 font-mono bg-slate-50/30 text-center">{item.plu || '-'}</td>
-                            <td className="px-6 py-4 text-sm font-mono text-slate-500">{item.oznaka || '-'}</td>
-                            <td className="px-6 py-4">
-                              <div className="font-medium text-slate-800">{item.naziv}</div>
-                              {item.opis && <div className="text-xs text-slate-400 mt-1">{item.opis}</div>}
-                              {item.rezervisano > 0 && (
-                                <div className="mt-2 space-y-1 bg-amber-50/60 p-2 rounded-xl border border-amber-100/70 max-w-xl animate-fade-in">
-                                  <span className="text-[10px] font-bold text-amber-800 uppercase tracking-wider block">Aktivne rezervacije:</span>
-                                  <div className="flex flex-wrap gap-1.5 mt-1">
-                                    {dohvatiAktivneRezervacije(item.naziv, item.rezervisano).map((rez, idx) => (
-                                      <span key={idx} className="bg-white border border-amber-200 text-amber-800 text-[11px] px-2 py-0.5 rounded-lg font-semibold shadow-sm">
-                                        📌 {rez.klijent} ({rez.kolicina} kom)
-                                      </span>
-                                    ))}
+                      <tbody className="divide-y divide-slate-100 text-sm">
+                        {filtriranaOprema.length === 0 ? (
+                          <tr><td colSpan="7" className="px-6 py-12 text-center text-slate-400 font-medium italic">Nema pronađenih artikala na zalihama.</td></tr>
+                        ) : (
+                          filtriranaOprema.map((item) => (
+                            <tr key={item.id} className="hover:bg-slate-50/40 transition-colors group">
+                              <td className="px-6 py-4 text-center font-bold text-blue-600 font-mono text-xs select-none">{item.plu || '-'}</td>
+                              <td className="px-6 py-4 font-mono text-xs text-slate-400 tracking-wide font-medium">{item.oznaka || '-'}</td>
+                              <td className="px-6 py-4 max-w-sm">
+                                <div className="font-bold text-slate-800 tracking-tight text-sm">{item.naziv}</div>
+                                {item.opis && <div className="text-xs text-slate-400 mt-1 font-medium leading-relaxed line-clamp-2" title={item.opis}>{item.opis}</div>}
+                                
+                                {item.rezervisano > 0 && (
+                                  <div className="mt-2 space-y-1 bg-amber-50/50 p-2 rounded-xl border border-amber-100/70 max-w-xl animate-fade-in">
+                                    <span className="text-[9px] font-bold text-amber-800 uppercase tracking-wider block">Aktivne rezervacije:</span>
+                                    <div className="flex flex-wrap gap-1 mt-0.5">
+                                      {dohvatiAktivneRezervacije(item.naziv, item.rezervisano).map((rez, idx) => (
+                                        <span key={idx} className="bg-white border border-amber-200 text-amber-700 text-[10px] px-2 py-0.5 rounded-md font-semibold shadow-sm">📌 {rez.klijent} ({rez.kolicina} kom)</span>
+                                      ))}
+                                    </div>
                                   </div>
-                                </div>
-                              )}
-                            </td>
-                            <td className="px-6 py-4"><span className="px-2.5 py-1 bg-slate-100 text-slate-600 text-xs rounded-md">{item.kategorija}</span></td>
-                            <td className="px-6 py-4 text-right font-semibold text-slate-800">{item.kolicina}</td>
-                            <td className={`px-6 py-4 text-right font-bold ${item.rezervisano > 0 ? 'text-amber-600 bg-amber-50/40' : 'text-slate-300'}`}>
-                              {item.rezervisano > 0 ? `🔒 ${item.rezervisano}` : '0'}
-                            </td>
-                          </tr>
-                        ))}
+                                )}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <span className="inline-block px-2.5 py-1 bg-blue-50 text-blue-700 text-xs rounded-lg font-semibold border border-blue-100">{item.kategorija || 'Nekategorisano'}</span>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                {item.kolicina > 0 ? (
+                                  <div className="flex items-center gap-2 text-slate-700 font-semibold text-xs">
+                                    <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                                    <span>{item.kolicina} komad</span>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center gap-2 text-slate-400 font-medium text-xs">
+                                    <span className="w-2 h-2 rounded-full bg-slate-300"></span>
+                                    <span>Nema na stanju</span>
+                                  </div>
+                                )}
+                              </td>
+                              <td className={`px-6 py-4 text-center font-bold text-xs whitespace-nowrap ${item.rezervisano > 0 ? 'text-amber-600 bg-amber-50/20' : 'text-slate-300'}`}>{item.rezervisano || '0'}</td>
+                              
+                              <td className="px-6 py-4 text-center relative whitespace-nowrap">
+                                <button onClick={(e) => { e.stopPropagation(); setOtvoreneAkcijeId(otvoreneAkcijeId === item.id ? null : item.id); }} className="p-1 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors">
+                                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 10a2 2 0 11-2 2 2 2 0 012-2zm0-6a2 2 0 11-2 2 2 2 0 012-2zm0 12a2 2 0 11-2 2 2 2 0 012-2z" /></svg>
+                                </button>
+                                {otvoreneAkcijeId === item.id && (
+                                  <>
+                                    <div className="fixed inset-0 z-20 cursor-default" onClick={(e) => { e.stopPropagation(); setOtvoreneAkcijeId(null); }}></div>
+                                    <div className="absolute right-6 mt-1 w-44 bg-white border border-slate-200 rounded-xl shadow-xl z-30 py-1 font-semibold text-xs text-left animate-fade-in">
+                                      <button onClick={() => { otvoriUrediArtikal(item); setOtvoreneAkcijeId(null); }} className="w-full px-4 py-2 hover:bg-slate-50 text-slate-700 flex items-center gap-1.5">✏️ Uredi</button>
+                                      
+                                      {item.rezervisano > 0 && mozeDaPovlaciIUnosi && (
+                                        <button onClick={() => { setIzabraniArtikal(item); setOtvorenModal('otkaziRezervaciju'); setKolicinaAkcija(1); setOtvoreneAkcijeId(null); }} className="w-full px-4 py-2 hover:bg-amber-50 text-amber-600 flex items-center gap-1.5 border-t border-slate-100">🔓 Otkaži rezervaciju</button>
+                                      )}
+
+                                      {jeLiAdmin && (
+                                        <button onClick={() => { pokreniBrisanjeArtiklaDirektno(item); setOtvoreneAkcijeId(null); }} className="w-full px-4 py-2 hover:bg-red-50 text-red-600 flex items-center gap-1.5 border-t border-slate-100">✕ Ukloni</button>
+                                      )}
+                                    </div>
+                                  </>
+                                )}
+                              </td>
+                            </tr>
+                          ))
+                        )}
                       </tbody>
                     </table>
+                  </div>
+
+                  <div className="p-4 bg-slate-50/70 border-t border-slate-200/80 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs font-semibold text-slate-500 select-none">
+                    <p>Prikazano {filtriranaOprema.length} od {oprema.length} rezultata</p>
+                    <div className="flex items-center gap-2">
+                      <span className="text-slate-400">Prikaži:</span>
+                      <select className="bg-white border border-slate-200 px-2 py-1 rounded-lg text-slate-700 outline-none"><option>10 po stranici</option></select>
+                      <div className="flex items-center border border-slate-200 bg-white rounded-lg overflow-hidden ml-2 shadow-sm">
+                        <button className="px-2.5 py-1.5 hover:bg-slate-50 text-slate-400">‹</button>
+                        <button className="px-3 py-1.5 bg-blue-600 text-white font-bold">1</button>
+                        <button className="px-2.5 py-1.5 hover:bg-slate-50 text-slate-400">›</button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </>
             )}
 
-            {/* HISTORIJA PROMETA TAB */}
+            {/* HISTORIJA PROMETA */}
             {aktivniTab === 'izvjestaji' && (
-               <div className="bg-white rounded-2xl shadow-[0_2px_10px_-3px_rgba(6,81,237,0.1)] border border-slate-100 overflow-hidden">
-                  <div className="p-6 border-b border-slate-100 pb-3 flex justify-between items-center bg-white px-6">
-                    <h3 className="font-semibold text-slate-800">Istorija prometa</h3>
+               <div className="bg-white border border-slate-200/70 rounded-2xl shadow-sm overflow-hidden flex flex-col">
+                  <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-white px-6 select-none">
+                    <h3 className="font-bold text-slate-900 tracking-tight text-base">Istorija magacinskog prometa</h3>
+                    <span className="text-[10px] font-bold tracking-widest uppercase bg-slate-100 border text-slate-500 px-2.5 py-1 rounded-lg">Audit Trail Log</span>
                   </div>
-                  <table className="w-full text-left text-sm border-collapse">
-                    <thead className="bg-white border-b border-slate-100 text-slate-400 uppercase text-xs font-semibold">
-                      <tr>
-                        <th className="px-6 py-4">Datum</th>
-                        <th className="px-6 py-4">Korisnik</th>
-                        <th className="px-6 py-4">Artikal</th>
-                        <th className="px-6 py-4">Tip</th>
-                        <th className="px-6 py-4 text-right">Kol.</th>
-                        <th className="px-6 py-4">Komentar</th>
-                        <th className="px-6 py-4 text-center">Akcija</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-50">
-                        {istorija.map(log => (
-                          <tr key={log.id} className="hover:bg-slate-50 transition">
-                            <td className="px-6 py-4 text-slate-500">{new Date(log.created_at).toLocaleString('sr-RS')}</td>
-                            <td className="px-6 py-4 font-bold text-slate-700 capitalize">👤 {log.korisnik || 'sistem'}</td>
-                            <td className="px-6 py-4 font-medium text-slate-800">{log.artikal}</td>
-                            <td className="px-6 py-4">
-                              <span className={`px-2.5 py-1 rounded text-xs font-bold ${
-                                log.tip === 'REZERVACIJA' ? 'bg-amber-100 text-amber-700' : 
-                                log.tip === 'OTKAZANA_REZERVACIJA' ? 'bg-slate-100 text-slate-600 border border-slate-200' :
-                                log.tip.includes('ULAZ') || log.tip === 'BRZI_ULAZ' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'
-                              }`}>
-                                {log.tip === 'BRZI_ULAZ' ? 'Ulaz' : (log.tip === 'IZLAZ_OTPREMNICA' ? 'Izlaz' : log.tip.replace('_', ' '))}
-                              </span>
-                            </td>
-                            <td className="px-6 py-4 text-right font-medium text-slate-800">{log.kolicina}</td>
-                            <td className="px-6 py-4 text-slate-500 text-xs">{log.komentar || '-'}</td>
-                            <td className="px-6 py-4 text-center">
-                              {log.tip === 'IZLAZ_OTPREMNICA' && (
-                                <button onClick={() => otvoriPregledOtpremnice(log)} className="text-xs bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg font-semibold hover:bg-blue-100 transition-colors">📄 Otpremnica</button>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                    </tbody>
-                  </table>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm border-collapse">
+                      <thead className="bg-slate-50/70 border-b border-slate-200 text-slate-400 uppercase text-[10px] tracking-widest font-bold">
+                        <tr>
+                          <th className="px-6 py-4">Datum upisa</th>
+                          <th className="px-6 py-4">Korisnik</th>
+                          <th className="px-6 py-4">Artikal</th>
+                          <th className="px-6 py-4">Tip prometa</th>
+                          <th className="px-6 py-4 text-center">Količina</th>
+                          <th className="px-6 py-4">Komentar / Detalji</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 text-xs font-semibold">
+                          {istorija.map(log => (
+                            <tr key={log.id} className="hover:bg-slate-50/40 transition">
+                              <td className="px-6 py-4 text-slate-400 font-medium">{new Date(log.created_at).toLocaleString('sr-RS')}</td>
+                              <td className="px-6 py-4 font-bold text-slate-700 capitalize">👤 {log.korisnik || 'sistem'}</td>
+                              <td className="px-6 py-4 text-slate-800 text-sm font-bold tracking-tight">{log.artikal}</td>
+                              <td className="px-6 py-4">
+                                <span className={`inline-block px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                                  log.tip === 'REZERVACIJA' ? 'bg-amber-100 text-amber-700' : 
+                                  log.tip === 'OTKAZANA_REZERVACIJA' ? 'bg-slate-100 text-slate-600 border' :
+                                  log.tip.includes('ULAZ') || log.tip === 'BRZI_ULAZ' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'
+                                }`}>
+                                  {log.tip === 'BRZI_ULAZ' ? 'Ulaz' : (log.tip === 'IZLAZ_OTPREMNICA' ? 'Izlaz' : log.tip.replace('_', ' '))}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4 text-center text-sm font-bold text-slate-800">{log.kolicina}</td>
+                              <td className="px-6 py-4 text-slate-500 font-medium max-w-xs truncate" title={log.komentar}>{log.komentar || '-'}</td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </div>
                </div>
             )}
           </div>
         </div>
       </div>
 
-      {/* MODAL: NOVI ARTIKAL */}
-      {otvorenModal === 'noviArtikal' && jeLiAdmin && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm">
-          <div className="bg-white p-6 rounded-2xl shadow-xl w-full max-w-md border border-slate-100">
-              <h2 className="text-lg font-bold mb-5 text-slate-800">Novi artikal</h2>
-              <form onSubmit={dodajNoviArtikal} className="space-y-4">
-                  <div className="grid grid-cols-3 gap-2">
-                    <div className="col-span-2">
-                      <label className="block text-xs font-medium text-slate-500 mb-1">Naziv artikla *</label>
-                      <input required value={naziv} onChange={e=>setNaziv(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg outline-none focus:border-blue-500 text-sm" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-500 mb-1">PLU (Redosled)</label>
-                      <input type="number" placeholder="Npr. 1" value={plu} onChange={e=>setPlu(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg outline-none focus:border-blue-500 text-sm font-bold text-blue-600 text-center" />
-                    </div>
-                  </div>
-                  <div><label className="block text-xs font-medium text-slate-500 mb-1">Oznaka (Šifra)</label><input value={oznaka} onChange={e=>setOznaka(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg outline-none focus:border-blue-500 text-sm" /></div>
-                  <div><label className="block text-xs font-medium text-slate-500 mb-1">Kategorija</label><input value={kategorija} onChange={e=>setKategorija(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg outline-none focus:border-blue-500 text-sm" /></div>
-                  <div><label className="block text-xs font-medium text-slate-500 mb-1">Opis</label><textarea value={opis} onChange={e=>setOpis(e.target.value)} rows="3" className="w-full border border-slate-200 p-2.5 rounded-lg outline-none focus:border-blue-500 text-sm resize-none"></textarea></div>
-                  <div className="flex justify-end gap-3 pt-4 mt-2 border-t border-slate-100">
-                      <button type="button" onClick={() => setOtvorenModal(null)} className="px-4 py-2 bg-slate-50 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-100 transition-colors">Odustani</button>
-                      <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors">Sačuvaj</button>
-                  </div>
-              </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL: UREDI ARTIKAL */}
-      {otvorenModal === 'urediArtikal' && jeLiAdmin && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm">
-          <div className="bg-white p-6 rounded-2xl shadow-xl w-full max-w-md border border-slate-100">
-              <h2 className="text-lg font-bold mb-5 text-slate-800">Uredi artikal</h2>
-              <form onSubmit={azurirajArtikal} className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-500 mb-1">Izaberi artikal za izmjenu</label>
-                    <select value={izabraniArtikal?.id || ''} onChange={(e) => handleIzaberiArtikalZaUredjivanje(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg outline-none focus:border-blue-500 text-sm bg-white">
-                      {oprema.map(o => <option key={o.id} value={o.id}>{o.naziv} ({o.oznaka || 'Nema šifru'})</option>)}
-                    </select>
-                  </div>
-                  <div className="grid grid-cols-3 gap-2">
-                    <div className="col-span-2">
-                      <label className="block text-xs font-medium text-slate-500 mb-1">Naziv artikla *</label>
-                      <input required value={naziv} onChange={e=>setNaziv(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg outline-none focus:border-blue-500 text-sm" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-500 mb-1">PLU (Redosled)</label>
-                      <input type="number" value={plu} onChange={e=>setPlu(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg outline-none focus:border-blue-500 text-sm font-bold text-blue-600 text-center" />
-                    </div>
-                  </div>
-                  <div><label className="block text-xs font-medium text-slate-500 mb-1">Oznaka (Šifra)</label><input value={oznaka} onChange={e=>setOznaka(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg outline-none focus:border-blue-500 text-sm" /></div>
-                  <div><label className="block text-xs font-medium text-slate-500 mb-1">Kategorija</label><input value={kategorija} onChange={e=>setKategorija(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg outline-none focus:border-blue-500 text-sm" /></div>
-                  <div><label className="block text-xs font-medium text-slate-500 mb-1">Opis</label><textarea value={opis} onChange={e=>setOpis(e.target.value)} rows="3" className="w-full border border-slate-200 p-2.5 rounded-lg outline-none focus:border-blue-500 text-sm resize-none"></textarea></div>
-                  <div className="flex justify-end gap-3 pt-4 mt-2 border-t border-slate-100">
-                      <button type="button" onClick={() => { setOtvorenModal(null); setIzabraniArtikal(null); }} className="px-4 py-2 bg-slate-50 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-100 transition-colors">Odustani</button>
-                      <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors">Sačuvaj izmjene</button>
-                  </div>
-              </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL: OBRIŠI ARTIKAL */}
-      {otvorenModal === 'obrisiArtikal' && jeLiAdmin && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm">
-          <div className="bg-white p-6 rounded-2xl shadow-xl w-full max-w-md border border-slate-100">
-              <h2 className="text-lg font-bold mb-3 text-red-600">Obriši artikal</h2>
-              <p className="text-xs text-slate-500 mb-5">Izaberite artikal koji želite trajno ukloniti iz baze podataka.</p>
-              <div className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-500 mb-1">Izaberi artikal</label>
-                    <select value={artikalZaBrisanjeId} onChange={(e) => setArtikalZaBrisanjeId(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg outline-none focus:border-red-500 text-sm bg-white">
-                      {oprema.map(o => <option key={o.id} value={o.id}>{o.naziv} ({o.oznaka || 'Nema šifru'})</option>)}
-                    </select>
-                  </div>
-                  <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
-                      <button type="button" onClick={() => { setOtvorenModal(null); setArtikalZaBrisanjeId(''); }} className="px-4 py-2 bg-slate-50 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-100 transition-colors">Odustani</button>
-                      <button type="button" onClick={pokreniBrisanjeArtikla} className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition-colors">Trajno obriši</button>
-                  </div>
-              </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL: PRIJEM / ULAZ ROBE */}
+      {/* MODAL: PRIJEM ROBE */}
       {otvorenModal === 'brziUlaz' && mozeDaPovlaciIUnosi && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm overflow-y-auto p-4">
-          <div className="bg-white p-6 rounded-2xl shadow-xl w-full max-w-2xl border border-slate-100 my-8">
-              <h2 className="text-xl font-bold mb-5 text-slate-800 border-b border-slate-100 pb-3">Ulaz robe (Prijem)</h2>
-              <form onSubmit={izvrsiBrziUlaz} className="space-y-5">
-                  <div className="bg-slate-50/50 p-4 rounded-xl border border-slate-200/60">
-                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Dobavljač *</label>
-                    <select required value={dobavljacId} onChange={(e) => setDobavljacId(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg outline-none focus:border-blue-500 text-sm bg-white">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 overflow-y-auto">
+          <div className="bg-white p-6 rounded-2xl shadow-2xl w-full max-w-2xl border border-slate-100 my-8 animate-fade-in">
+              <h2 className="text-xl font-black text-slate-900 border-b border-slate-100 pb-3 tracking-tight">Prijem robe (Novi Ulaz)</h2>
+              <form onSubmit={izvrsiBrziUlaz} className="space-y-5 mt-4">
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Dobavljač *</label>
+                    <select required value={dobavljacId} onChange={(e) => setDobavljacId(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-xl text-sm bg-white outline-none focus:border-blue-500 font-semibold text-slate-700">
                       <option value="">Izaberi dobavljača...</option>
                       {komitenti.filter(k => k.tip === 'Dobavljac' || k.tip === 'Oboje').map(k => (
                         <option key={k.id} value={k.id}>{k.naziv} ({k.grad || '-'})</option>
@@ -924,12 +965,12 @@ export default function Dashboard() {
                     {dobavljacId === 'novo' && (
                       <div className="grid grid-cols-2 gap-4 bg-blue-50/40 p-4 mt-3 rounded-xl border border-blue-100 animate-fade-in">
                         <div>
-                          <label className="block text-[11px] font-semibold text-slate-500 mb-1">Ime dobavljača *</label>
-                          <input required placeholder="Ime" value={noviDobavljacNaziv} onChange={e=>setNoviDobavljacNaziv(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg text-xs bg-white outline-none focus:border-blue-500" />
+                          <label className="block text-[11px] font-bold text-slate-500 mb-1">Ime dobavljača *</label>
+                          <input required placeholder="Ime" value={noviDobavljacNaziv} onChange={e=>setNoviDobavljacNaziv(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-xl text-xs bg-white outline-none focus:border-blue-500 font-medium" />
                         </div>
                         <div>
-                          <label className="block text-[11px] font-semibold text-slate-500 mb-1">Grad dobavljača</label>
-                          <input placeholder="Grad" value={noviDobavljacGrad} onChange={e=>setNoviDobavljacGrad(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg text-xs bg-white outline-none focus:border-blue-500" />
+                          <label className="block text-[11px] font-bold text-slate-500 mb-1">Grad dobavljača</label>
+                          <input placeholder="Grad" value={noviDobavljacGrad} onChange={e=>setNoviDobavljacGrad(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-xl text-xs bg-white outline-none focus:border-blue-500 font-medium" />
                         </div>
                       </div>
                     )}
@@ -940,11 +981,11 @@ export default function Dashboard() {
                       <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Stavke prijema</h3>
                       <button type="button" onClick={dodajStavkuUlaza} className="text-xs font-bold text-blue-600 hover:text-blue-700 bg-blue-50 px-3 py-1.5 rounded-lg transition-colors">+ Dodaj artikal</button>
                     </div>
-                    <div className="space-y-3 max-h-[250px] overflow-y-auto pr-2 no-scrollbar">
+                    <div className="space-y-3 max-h-[200px] overflow-y-auto pr-2 no-scrollbar">
                       {stavkeUlaza.map((stavka, index) => (
                         <div key={index} className="flex gap-3 items-center bg-white border border-slate-200 p-3 rounded-xl shadow-sm">
                           <div className="flex-1">
-                            <select value={stavka.opremaId} onChange={(e) => promeniStavkuUlaza(index, 'opremaId', e.target.value)} className="w-full border border-slate-200 p-2 rounded-lg outline-none focus:border-blue-500 text-sm bg-white">
+                            <select value={stavka.opremaId} onChange={(e) => promeniStavkuUlaza(index, 'opremaId', e.target.value)} className="w-full border border-slate-200 p-2 rounded-lg text-sm bg-white outline-none focus:border-blue-500 text-slate-700 font-medium">
                               <option value="">Izaberi artikal...</option>
                               {oprema.map(o => (
                                 <option key={o.id} value={o.id}>{o.naziv} (Stanje: {o.kolicina})</option>
@@ -952,17 +993,17 @@ export default function Dashboard() {
                             </select>
                           </div>
                           <div className="w-24">
-                            <input type="number" min="1" value={stavka.kolicina} onChange={(e) => promeniStavkuUlaza(index, 'kolicina', e.target.value)} className="w-full border border-slate-200 p-2 rounded-lg outline-none focus:border-blue-500 text-sm text-center font-bold" />
+                            <input type="number" min="1" value={stavka.kolicina} onChange={(e) => promeniStavkuUlaza(index, 'kolicina', e.target.value)} className="w-full border border-slate-200 p-2 rounded-lg text-sm text-center font-bold text-slate-800" />
                           </div>
                           <button type="button" onClick={() => ukloniStavkuUlaza(index)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors">✕</button>
                         </div>
                       ))}
                     </div>
                   </div>
-                  <div><label className="block text-xs font-medium text-slate-500 mb-1">Komentar / Napomena</label><input value={komentar} onChange={e=>setKomentar(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg outline-none focus:border-blue-500 text-sm" /></div>
+                  <div><label className="block text-xs font-bold text-slate-500 mb-1">Komentar / Napomena</label><input value={komentar} onChange={e=>setKomentar(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-xl outline-none focus:border-blue-500 text-sm font-medium" /></div>
                   <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
-                      <button type="button" onClick={() => setOtvorenModal(null)} className="px-5 py-2.5 bg-slate-50 text-slate-600 rounded-lg text-sm font-semibold hover:bg-slate-100 transition-colors">Odustani</button>
-                      <button type="submit" className="px-5 py-2.5 bg-slate-900 text-white rounded-lg text-sm font-bold hover:bg-slate-800 transition-colors shadow-md shadow-slate-300">Potvrdi ulaz robe</button>
+                      <button type="button" onClick={() => setOtvorenModal(null)} className="px-5 py-2.5 bg-slate-100 text-slate-600 rounded-xl text-sm font-semibold hover:bg-slate-200 transition-colors">Odustani</button>
+                      <button type="submit" className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-sm font-bold shadow-md">Potvrdi ulaz robe</button>
                   </div>
               </form>
           </div>
@@ -972,27 +1013,25 @@ export default function Dashboard() {
       {/* MODAL: NOVA REZERVACIJA */}
       {otvorenModal === 'novaRezervacija' && mozeDaPovlaciIUnosi && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm">
-          <div className="bg-white p-6 rounded-2xl shadow-xl w-full max-w-md border border-slate-100">
-              <h2 className="text-lg font-bold mb-5 text-amber-600 flex items-center gap-1.5">📌 Nova Rezervacija robe</h2>
+          <div className="bg-white p-6 rounded-2xl shadow-xl w-full max-w-md border border-slate-100 animate-fade-in">
+              <h2 className="text-lg font-black mb-5 text-amber-600 flex items-center gap-1.5 tracking-tight">📌 Nova Rezervacija robe</h2>
               <form onSubmit={izvrsiRezervacijuOpreme} className="space-y-4">
                   <div>
-                    <label className="block text-xs font-medium text-slate-500 mb-1">Izaberi artikal za rezervaciju</label>
-                    <select required value={izabraniArtikal?.id || ''} className="w-full border border-slate-200 p-2.5 rounded-lg outline-none focus:border-blue-500 text-sm bg-white font-semibold" onChange={(e) => setIzabraniArtikal(oprema.find(o => o.id == e.target.value))}>
+                    <label className="block text-xs font-bold text-slate-500 mb-1">Izaberi artikal za rezervaciju</label>
+                    <select required value={izabraniArtikal?.id || ''} className="w-full border border-slate-200 p-2.5 rounded-xl text-sm bg-white font-semibold text-slate-700 outline-none" onChange={(e) => setIzabraniArtikal(oprema.find(o => o.id == e.target.value))}>
                       {oprema.map(o => (
-                        <option key={o.id} value={o.id}>
-                          {o.naziv} (Slobodno: {o.kolicina - (o.rezervisano || 0)}){o.rezervisano > 0 ? ` [🔒 Rezervisano: ${o.rezervisano}]` : ''}
-                        </option>
+                        <option key={o.id} value={o.id}>{o.naziv} (Slobodno: {o.kolicina - (o.rezervisano || 0)})</option>
                       ))}
                     </select>
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-slate-500 mb-1">Količina za rezervaciju</label>
-                    <input type="number" min="1" required value={kolicinaAkcija} onChange={e=>setKolicinaAkcija(e.target.value)} className="w-full border border-slate-300 p-2.5 rounded-lg outline-none focus:border-blue-500 text-sm font-bold" />
+                    <label className="block text-xs font-bold text-slate-500 mb-1">Količina za rezervaciju</label>
+                    <input type="number" min="1" required value={kolicinaAkcija} onChange={e=>setKolicinaAkcija(e.target.value)} className="w-full border border-slate-300 p-2.5 rounded-xl text-sm font-bold text-slate-800" />
                   </div>
                   
                   <div>
                     <label className="block text-xs font-bold text-slate-500 mb-1">Za kog Kupca / Klijenta? *</label>
-                    <select required value={rezervacijaKupacId} onChange={(e) => setRezervacijaKupacId(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg outline-none focus:border-blue-500 text-sm bg-white">
+                    <select required value={rezervacijaKupacId} onChange={(e) => setRezervacijaKupacId(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-xl text-sm bg-white font-semibold text-slate-700 outline-none">
                       <option value="">Izaberi klijenta...</option>
                       {komitenti.filter(k => k.tip === 'Kupac' || k.tip === 'Oboje').map(k => (
                         <option key={k.id} value={k.id}>{k.naziv} ({k.grad || '-'})</option>
@@ -1004,20 +1043,20 @@ export default function Dashboard() {
                   {rezervacijaKupacId === 'novo' && (
                     <div className="grid grid-cols-2 gap-2 bg-blue-50/40 p-3 rounded-xl border border-blue-100 animate-fade-in">
                       <div>
-                        <label className="block text-[11px] font-semibold text-slate-500 mb-1">Ime klijenta *</label>
-                        <input required placeholder="Ime" value={noviRezKupacNaziv} onChange={e=>setNoviRezKupacNaziv(e.target.value)} className="w-full border border-slate-200 p-2 rounded-lg text-xs bg-white outline-none focus:border-blue-500" />
+                        <label className="block text-[11px] font-bold text-slate-500 mb-1">Ime klijenta *</label>
+                        <input required placeholder="Ime" value={noviRezKupacNaziv} onChange={e=>setNoviRezKupacNaziv(e.target.value)} className="w-full border border-slate-200 p-2 rounded-lg text-xs bg-white outline-none font-medium" />
                       </div>
                       <div>
-                        <label className="block text-[11px] font-semibold text-slate-500 mb-1">Grad klijenta</label>
-                        <input placeholder="Grad" value={noviRezKupacGrad} onChange={e=>setNoviRezKupacGrad(e.target.value)} className="w-full border border-slate-200 p-2 rounded-lg text-xs bg-white outline-none focus:border-blue-500" />
+                        <label className="block text-[11px] font-bold text-slate-500 mb-1">Grad klijenta</label>
+                        <input placeholder="Grad" value={noviRezKupacGrad} onChange={e=>setNoviRezKupacGrad(e.target.value)} className="w-full border border-slate-200 p-2 rounded-lg text-xs bg-white outline-none font-medium" />
                       </div>
                     </div>
                   )}
 
-                  <div><label className="block text-xs font-medium text-slate-500 mb-1">Napomena uz rezervaciju</label><input value={komentar} onChange={e=>setKomentar(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg outline-none focus:border-blue-500 text-sm" /></div>
+                  <div><label className="block text-xs font-bold text-slate-500 mb-1">Napomena uz rezervaciju</label><input value={komentar} onChange={e=>setKomentar(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-xl text-sm font-medium outline-none" /></div>
                   <div className="flex justify-end gap-3 pt-4 mt-2 border-t border-slate-100">
-                      <button type="button" onClick={() => setOtvorenModal(null)} className="px-4 py-2 bg-slate-50 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-100 transition-colors">Odustani</button>
-                      <button type="submit" className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-sm font-bold shadow-md shadow-amber-200 transition-colors">Potvrdi i rezerviši</button>
+                      <button type="button" onClick={() => setOtvorenModal(null)} className="px-4 py-2 bg-slate-50 text-slate-600 rounded-xl text-sm font-medium hover:bg-slate-100">Odustani</button>
+                      <button type="submit" className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-sm font-bold shadow-md">Potvrdi i rezerviši</button>
                   </div>
               </form>
           </div>
@@ -1027,41 +1066,36 @@ export default function Dashboard() {
       {/* MODAL: OTKAZIVANJE REZERVACIJE */}
       {otvorenModal === 'otkaziRezervaciju' && mozeDaPovlaciIUnosi && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm">
-          <div className="bg-white p-6 rounded-2xl shadow-xl w-full max-w-md border border-slate-100">
-              <h2 className="text-lg font-bold mb-3 text-slate-800 flex items-center gap-1.5">✕ Otkaži rezervaciju</h2>
-              <p className="text-xs text-slate-500 mb-5">Oslobodite količinu koja je bila rezervisana za klijenta.</p>
+          <div className="bg-white p-6 rounded-2xl shadow-xl w-full max-w-md border border-slate-100 animate-fade-in">
+              <h2 className="text-lg font-bold mb-3 text-slate-900 flex items-center gap-1.5 tracking-tight">✕ Otkaži aktivnu rezervaciju</h2>
+              <p className="text-xs text-slate-400 mb-4">Oslobodite dio ili cijelu rezervisanu količinu artikla za klijenta.</p>
               <form onSubmit={izvrsiOtkazivanjeRezervacije} className="space-y-4">
                   <div>
-                    <label className="block text-xs font-medium text-slate-500 mb-1">Izaberi rezervisani artikal</label>
-                    <select required value={izabraniArtikal?.id || ''} className="w-full border border-slate-200 p-2.5 rounded-lg outline-none focus:border-blue-500 text-sm bg-white font-semibold" onChange={(e) => setIzabraniArtikal(oprema.find(o => o.id == e.target.value))}>
+                    <label className="block text-xs font-bold text-slate-500 mb-1">Izaberi rezervisani artikal</label>
+                    <select required value={izabraniArtikal?.id || ''} className="w-full border border-slate-200 p-2.5 rounded-xl text-sm bg-white font-semibold text-slate-700 outline-none" onChange={(e) => setIzabraniArtikal(oprema.find(o => o.id == e.target.value))}>
                       {oprema.filter(o => o.rezervisano > 0).length === 0 && <option value="">Nema rezervisanih artikala</option>}
                       {oprema.filter(o => o.rezervisano > 0).map(o => (
-                        <option key={o.id} value={o.id}>
-                          {o.naziv} (Aktivno rezervisano: {o.rezervisano} kom)
-                        </option>
+                        <option key={o.id} value={o.id}>{o.naziv} (Rezervisano: {o.rezervisano} kom)</option>
                       ))}
                     </select>
                   </div>
-                  
                   <div>
-                    <label className="block text-xs font-bold text-slate-500 mb-1">Za kog klijenta otkazujemo? *</label>
-                    <select required value={otkaziKlijentId} onChange={(e) => setOtkaziKlijentId(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg outline-none focus:border-blue-500 text-sm bg-white">
+                    <label className="block text-xs font-bold text-slate-500 mb-1">Klijent za koga se otkazuje *</label>
+                    <select required value={otkaziKlijentId} onChange={(e) => setOtkaziKlijentId(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-xl text-sm bg-white font-semibold text-slate-700 outline-none">
                       <option value="">Izaberi klijenta...</option>
                       {komitenti.filter(k => k.tip === 'Kupac' || k.tip === 'Oboje').map(k => (
                         <option key={k.id} value={k.id}>{k.naziv} ({k.grad || '-'})</option>
                       ))}
                     </select>
                   </div>
-
                   <div>
-                    <label className="block text-xs font-medium text-slate-500 mb-1">Koliko komada otkazujemo?</label>
-                    <input type="number" min="1" required value={kolicinaAkcija} onChange={e=>setKolicinaAkcija(e.target.value)} className="w-full border border-slate-300 p-2.5 rounded-lg outline-none focus:border-blue-500 text-sm font-bold" />
+                    <label className="block text-xs font-bold text-slate-500 mb-1">Količina za otkazivanje</label>
+                    <input type="number" min="1" required value={kolicinaAkcija} onChange={e=>setKolicinaAkcija(e.target.value)} className="w-full border border-slate-300 p-2.5 rounded-xl text-sm font-bold text-slate-800" />
                   </div>
-                  
-                  <div><label className="block text-xs font-medium text-slate-500 mb-1">Razlog / Napomena</label><input placeholder="Npr. Klijent odustao" value={komentar} onChange={e=>setKomentar(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg outline-none focus:border-blue-500 text-sm" /></div>
+                  <div><label className="block text-xs font-bold text-slate-500 mb-1">Razlog / Napomena</label><input placeholder="Npr. Promjena porudžbine" value={komentar} onChange={e=>setKomentar(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-xl text-sm font-medium outline-none" /></div>
                   <div className="flex justify-end gap-3 pt-4 mt-2 border-t border-slate-100">
-                      <button type="button" onClick={() => setOtvorenModal(null)} className="px-4 py-2 bg-slate-50 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-100 transition-colors">Odustani</button>
-                      <button type="submit" disabled={oprema.filter(o => o.rezervisano > 0).length === 0} className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white disabled:bg-slate-300 rounded-lg text-sm font-bold shadow-md transition-colors">Otkaži rezervaciju</button>
+                      <button type="button" onClick={() => setOtvorenModal(null)} className="px-4 py-2 bg-slate-50 text-slate-600 rounded-xl text-sm font-medium hover:bg-slate-100">Odustani</button>
+                      <button type="submit" disabled={oprema.filter(o => o.rezervisano > 0).length === 0} className="px-4 py-2 bg-slate-900 hover:bg-slate-950 text-white rounded-xl text-sm font-bold">Ukloni rezervaciju</button>
                   </div>
               </form>
           </div>
@@ -1070,18 +1104,16 @@ export default function Dashboard() {
 
       {/* MODAL: OTPREMNICA / IZLAZ ROBE */}
       {otvorenModal === 'otpremnica' && mozeDaPovlaciIUnosi && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm overflow-y-auto p-4">
-          <div className="bg-white p-6 rounded-2xl shadow-xl w-full max-w-2xl border border-slate-100 my-8">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm overflow-y-auto p-4">
+          <div className="bg-white p-6 rounded-2xl shadow-xl w-full max-w-2xl border border-slate-100 my-8 animate-fade-in">
               <div className="flex justify-between items-center mb-5 border-b border-slate-100 pb-3">
-                <h2 className="text-xl font-bold text-slate-800">Nova Otpremnica</h2>
-                <span className="text-xs font-bold text-slate-400 bg-slate-100 px-2.5 py-1 rounded-md">IZLAZ ROBE</span>
+                <h2 className="text-xl font-black text-slate-900 tracking-tight">Nova Otpremnica (Izlaz)</h2>
               </div>
-              
               <form onSubmit={sacuvajIKnjiziOtpremnicu} className="space-y-6">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-50/50 p-4 rounded-xl border border-slate-200/60">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200">
                     <div className="md:col-span-2">
-                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Izaberi Kupca / Primalaca *</label>
-                      <select required value={kupacId} onChange={(e) => setKupacId(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg outline-none focus:border-blue-500 text-sm bg-white">
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Kupac / Primalac *</label>
+                      <select required value={kupacId} onChange={(e) => setKupacId(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg text-sm bg-white font-semibold text-slate-700 outline-none">
                         <option value="">Izaberi klijenta...</option>
                         {komitenti.filter(k => k.tip === 'Kupac' || k.tip === 'Oboje').map(k => (
                           <option key={k.id} value={k.id}>{k.naziv} ({k.grad || '-'})</option>
@@ -1091,17 +1123,17 @@ export default function Dashboard() {
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Otpremnicu predao/la *</label>
-                      <input required placeholder="Ime Prezime" value={predaoIme} onChange={e=>setPredaoIme(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg outline-none focus:border-blue-500 bg-white text-sm font-semibold" />
+                      <input required placeholder="Ime Prezime" value={predaoIme} onChange={e=>setPredaoIme(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg bg-white text-sm font-semibold text-slate-800" />
                     </div>
                     {kupacId === 'novo' && (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:col-span-3 bg-blue-50/40 p-4 rounded-xl border border-blue-100/60 animate-fade-in">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:col-span-3 bg-blue-50/40 p-4 mt-3 rounded-xl border border-blue-100/60 animate-fade-in">
                         <div>
-                          <label className="block text-xs font-semibold text-slate-600 mb-1">Ime novog kupca *</label>
-                          <input required placeholder="Ime" value={noviKupacNaziv} onChange={e=>setNoviKupacNaziv(e.target.value)} className="w-full border border-slate-200 p-2 text-sm bg-white outline-none focus:border-blue-500" />
+                          <label className="block text-xs font-bold text-slate-500 mb-1">Ime novog kupca *</label>
+                          <input required placeholder="Ime" value={noviKupacNaziv} onChange={e=>setNoviKupacNaziv(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg text-sm bg-white outline-none focus:border-blue-500 font-medium" />
                         </div>
                         <div>
-                          <label className="block text-xs font-semibold text-slate-600 mb-1">Grad novog kupca *</label>
-                          <input required placeholder="Grad" value={noviKupacGrad} onChange={e=>setNoviKupacGrad(e.target.value)} className="w-full border border-slate-200 p-2 text-sm bg-white outline-none focus:border-blue-500" />
+                          <label className="block text-xs font-bold text-slate-500 mb-1">Grad novog kupca *</label>
+                          <input required placeholder="Grad" value={noviKupacGrad} className="w-full border border-slate-200 p-2.5 rounded-lg text-sm bg-white outline-none focus:border-blue-500 font-medium" />
                         </div>
                       </div>
                     )}
@@ -1119,7 +1151,7 @@ export default function Dashboard() {
                           <div key={index} className="bg-white border border-slate-200 p-3 rounded-xl shadow-sm space-y-2">
                             <div className="flex gap-3 items-center">
                               <div className="flex-1">
-                                <select value={stavka.opremaId} onChange={(e) => dogodiSeIzmenaArtiklaUStavci(index, e.target.value)} className="w-full border border-slate-200 p-2 rounded-lg outline-none focus:border-blue-500 text-sm bg-white">
+                                <select value={stavka.opremaId} onChange={(e) => dogodiSeIzmenaArtiklaUStavci(index, e.target.value)} className="w-full border border-slate-200 p-2 rounded-lg text-sm bg-white text-slate-700 font-medium outline-none">
                                   <option value="">Izaberi artikal...</option>
                                   {oprema.map(o => ( 
                                     <option key={o.id} value={o.id}>{o.naziv} (Na stanju: {o.kolicina}){o.rezervisano > 0 ? ` [⚠️ Rezervisano: ${o.rezervisano}]` : ''}</option> 
@@ -1127,19 +1159,14 @@ export default function Dashboard() {
                                 </select>
                               </div>
                               <div className="w-24">
-                                <input type="number" min="1" value={stavka.kolicina} onChange={(e) => promeniStavkuOtpremnice(index, 'kolicina', e.target.value)} className="w-full border border-slate-200 p-2 rounded-lg outline-none focus:border-blue-500 text-sm text-center font-bold" />
+                                <input type="number" min="1" value={stavka.kolicina} onChange={(e) => promeniStavkuOtpremnice(index, 'kolicina', e.target.value)} className="w-full border border-slate-200 p-2 rounded-lg text-sm text-center font-bold text-slate-800" />
                               </div>
                               <button type="button" onClick={() => ukloniStavkuOtpremnice(index)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors">✕</button>
                             </div>
-
                             {trenutniArtikal && trenutniArtikal.rezervisano > 0 && (
-                              <div className="text-xs bg-amber-50 text-amber-800 p-2 rounded-xl border border-amber-200/70 flex items-center justify-between animate-fade-in">
-                                <span className="font-medium">Ovaj artikal ima aktivne rezervacije ({trenutniArtikal.rezervisano} kom). Knjižimo:</span>
-                                <select 
-                                  value={stavka.poRezervaciji ? "da" : "ne"}
-                                  onChange={(e) => promeniStavkuOtpremnice(index, 'poRezervaciji', e.target.value === "da")}
-                                  className="bg-white border border-amber-300 font-bold px-2 py-1 rounded-lg text-xs outline-none cursor-pointer text-amber-900"
-                                >
+                              <div className="text-xs bg-amber-50 text-amber-800 p-2 rounded-xl border border-amber-200 flex items-center justify-between animate-fade-in">
+                                <span className="font-medium">Ovaj artikal ima aktivne rezervacije. Knjižimo:</span>
+                                <select value={stavka.poRezervaciji ? "da" : "ne"} onChange={(e) => promeniStavkuOtpremnice(index, 'poRezervaciji', e.target.value === "da")} className="bg-white border border-amber-300 font-bold px-2 py-1 rounded-lg text-xs outline-none cursor-pointer text-amber-900">
                                   <option value="ne">Mimo rezervacije</option>
                                   <option value="da">Po rezervaciji (Skida i rezervu)</option>
                                 </select>
@@ -1151,115 +1178,109 @@ export default function Dashboard() {
                     </div>
                   </div>
                   <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
-                      <button type="button" onClick={() => setOtvorenModal(null)} className="px-5 py-2.5 bg-slate-100 text-slate-600 rounded-lg text-sm font-semibold hover:bg-slate-200 transition-colors">Odustani</button>
-                      <button type="submit" className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition-all shadow-md shadow-blue-100">Knjiži i generiši otpremnicu</button>
+                      <button type="button" onClick={() => setOtvorenModal(null)} className="px-5 py-2.5 bg-slate-100 text-slate-600 rounded-xl text-sm font-semibold hover:bg-slate-200 transition-colors">Odustani</button>
+                      <button type="submit" className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-bold shadow-md shadow-blue-100">Knjiži i generiši otpremnicu</button>
                   </div>
               </form>
           </div>
         </div>
       )}
 
-      {/* MODAL: PREGLED PREVIEW OTPREMNICE */}
-      {pregledOtpremnice && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4 overflow-y-auto">
-          <div className="bg-white p-8 rounded-2xl shadow-2xl w-full max-w-3xl border border-slate-100 my-8">
-            <div className="flex justify-between items-start border-b border-slate-100 pb-4 mb-6">
-              <div>
-                <h2 className="text-xl font-bold text-slate-800">Pregled Otpremnice #{pregledOtpremnice.broj}</h2>
-                <p className="text-xs text-slate-400 mt-1">Datum kreiranja dokumenta: {pregledOtpremnice.datum}</p>
-              </div>
-              <button onClick={() => setPregledOtpremnice(null)} className="text-slate-400 hover:text-slate-600 text-xl font-bold p-1">✕</button>
-            </div>
-            <div className="border border-slate-200 rounded-xl p-6 bg-slate-50/50 space-y-6 text-sm">
-              <div className="flex justify-between items-start">
-                <div>
-                  <h3 className="font-bold text-slate-800">Montora Software d.o.o.</h3>
-                  <p className="text-xs text-slate-500 mt-1">Capital Plaza, Ul. Šeika Zaida 13/L2-A06</p>
-                  <p className="text-xs text-slate-500">81000 Podgorica, Crna Gora</p>
-                </div>
-                <div className="text-right">
-                  <h3 className="font-bold text-slate-800">Kupac / Primalac:</h3>
-                  <p className="text-slate-600 mt-1 font-medium">{pregledOtpremnice.kupac}</p>
-                  <p className="text-slate-500 text-xs">{pregledOtpremnice.grad}</p>
-                </div>
-              </div>
-              <div className="border border-slate-200 rounded-lg overflow-hidden bg-white">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="bg-slate-50 border-b border-slate-200">
-                      <th className="px-4 py-2.5 text-xs font-bold text-slate-500 text-center w-12">R.B.</th>
-                      <th className="px-4 py-2.5 text-xs font-bold text-slate-500">Opis robe / artikla</th>
-                      <th className="px-4 py-2.5 text-xs font-bold text-slate-500 text-center w-16">Kol.</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {pregledOtpremnice.stavke.map((st, i) => (
-                      <tr key={i}>
-                        <td className="px-4 py-3 text-slate-500 text-center">{i + 1}.</td>
-                        <td className="px-4 py-3"><span className="font-medium text-slate-800">{st.opis !== '-' && st.opis ? st.opis : st.naziv}</span></td>
-                        <td className="px-4 py-3 text-center font-bold text-slate-800">{st.kolicina}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div className="flex justify-between pt-6">
-                <div>
-                  <p className="text-xs text-slate-500">Za {pregledOtpremnice.kupac}</p>
-                  <div className="border-b border-slate-300 w-44 mt-6"></div>
-                  <p className="text-[10px] text-slate-400 mt-1">(Primio/la)</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-xs text-slate-500">Za Montora software d.o.o.</p>
-                  <p className="text-xs font-bold text-slate-700 mt-2">{pregledOtpremnice.predao}</p>
-                  <div className="border-b border-slate-300 w-44 mt-2 ml-auto"></div>
-                  <p className="text-[10px] text-slate-400 mt-1">(Predao/la)</p>
-                </div>
-              </div>
-            </div>
-            <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-slate-100">
-              <button onClick={() => setPregledOtpremnice(null)} className="px-5 py-2.5 bg-slate-100 text-slate-600 rounded-lg text-sm font-semibold hover:bg-slate-200 transition-colors">Zatvori</button>
-              <button onClick={async () => { await generisiPDFOtpremnicu(pregledOtpremnice.stavke, pregledOtpremnice.kupac, pregledOtpremnice.grad, pregledOtpremnice.predao, pregledOtpremnice.broj, pregledOtpremnice.datumObj); }} className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition-all shadow-md shadow-blue-100 flex items-center gap-2">⬇️ Preuzmi PDF</button>
-            </div>
+      {/* MODAL: NOVI ARTIKAL */}
+      {otvorenModal === 'noviArtikal' && jeLiAdmin && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm">
+          <div className="bg-white p-6 rounded-2xl shadow-xl w-full max-w-md border border-slate-100 animate-fade-in">
+              <h2 className="text-lg font-bold mb-5 text-slate-800 tracking-tight">Dodaj novi artikal u bazu</h2>
+              <form onSubmit={dodajNoviArtikal} className="space-y-4">
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="col-span-2">
+                      <label className="block text-xs font-bold text-slate-500 mb-1">Naziv artikla *</label>
+                      <input required value={naziv} onChange={e=>setNaziv(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-xl outline-none focus:border-blue-500 text-sm font-medium" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 mb-1">PLU broj *</label>
+                      <input type="number" required placeholder="Red.br" value={plu} onChange={e=>setPlu(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-xl outline-none focus:border-blue-500 text-sm font-bold text-blue-600 text-center" />
+                    </div>
+                  </div>
+                  <div><label className="block text-xs font-bold text-slate-500 mb-1">Šifra / Oznaka</label><input value={oznaka} onChange={e=>setOznaka(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-xl outline-none focus:border-blue-500 text-sm font-mono" /></div>
+                  <div><label className="block text-xs font-bold text-slate-500 mb-1">Kategorija</label><input value={kategorija} onChange={e=>setKategorija(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-xl outline-none focus:border-blue-500 text-sm font-medium" /></div>
+                  <div><label className="block text-xs font-bold text-slate-500 mb-1">Opis</label><textarea value={opis} onChange={e=>setOpis(e.target.value)} rows="3" className="w-full border border-slate-200 p-2.5 rounded-xl outline-none focus:border-blue-500 text-sm resize-none font-medium text-slate-600 leading-relaxed"></textarea></div>
+                  <div className="flex justify-end gap-3 pt-4 mt-2 border-t border-slate-100">
+                      <button type="button" onClick={() => setOtvorenModal(null)} className="px-4 py-2 bg-slate-50 text-slate-600 rounded-xl text-sm font-medium hover:bg-slate-100">Odustani</button>
+                      <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold shadow-md">Sačuvaj artikal</button>
+                  </div>
+              </form>
           </div>
         </div>
       )}
 
-      {/* MODAL: ADMIN PANEL */}
+      {/* MODAL: UREDI ARTIKAL */}
+      {otvorenModal === 'urediArtikal' && mozeDaPovlaciIUnosi && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm">
+          <div className="bg-white p-6 rounded-2xl shadow-xl w-full max-w-md border border-slate-100 animate-fade-in">
+              <h2 className="text-lg font-bold mb-5 text-slate-800 tracking-tight">Izmjena podataka o artiklu</h2>
+              <form onSubmit={azurirajArtikal} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-500 mb-1">Artikal koji menjate</label>
+                    <select value={izabraniArtikal?.id || ''} onChange={(e) => handleIzaberiArtikalZaUredjivanje(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg text-sm bg-white text-slate-700 font-bold outline-none">
+                      {oprema.map(o => <option key={o.id} value={o.id}>{o.naziv} ({o.oznaka || 'Bez šifre'})</option>)}
+                    </select>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="col-span-2">
+                      <label className="block text-xs font-bold text-slate-500 mb-1">Naziv artikla *</label>
+                      <input required value={naziv} onChange={e=>setNaziv(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-xl outline-none text-sm font-bold text-slate-800" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 mb-1">PLU broj</label>
+                      <input type="number" value={plu} onChange={e=>setPlu(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-xl outline-none text-sm font-bold text-blue-600 text-center" />
+                    </div>
+                  </div>
+                  <div><label className="block text-xs font-bold text-slate-500 mb-1">Šifra / Oznaka</label><input value={oznaka} onChange={e=>setOznaka(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-xl outline-none text-sm font-mono text-slate-700" /></div>
+                  <div><label className="block text-xs font-bold text-slate-500 mb-1">Kategorija</label><input value={kategorija} onChange={e=>setKategorija(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-xl outline-none text-sm font-medium text-slate-700" /></div>
+                  <div><label className="block text-xs font-bold text-slate-500 mb-1">Opis / Specifikacija</label><textarea value={opis} onChange={e=>setOpis(e.target.value)} rows="3" className="w-full border border-slate-200 p-2.5 rounded-xl text-sm resize-none font-medium text-slate-600 leading-relaxed"></textarea></div>
+                  <div className="flex justify-end gap-3 pt-4 mt-2 border-t border-slate-100">
+                      <button type="button" onClick={() => { setOtvorenModal(null); setIzabraniArtikal(null); }} className="px-4 py-2 bg-slate-50 text-slate-600 rounded-xl text-sm font-medium hover:bg-slate-100">Odustani</button>
+                      <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold shadow-md">Sačuvaj promjene</button>
+                  </div>
+              </form>
+          </div>
+        </div>
+      )}
+
+      {/* KONTROLNI PANEL ADMINISTRATORA */}
       {otvorenModal === 'podesavanja' && jeLiAdmin && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4 overflow-y-auto">
-          <div className="bg-white p-6 rounded-2xl shadow-2xl w-full max-w-4xl border border-slate-100 my-8">
+          <div className="bg-white p-6 rounded-2xl shadow-2xl w-full max-w-4xl border border-slate-100 my-8 animate-fade-in">
             <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-3">
               <div>
-                <h2 className="text-xl font-bold text-slate-800">Kontrolni panel administratora</h2>
+                <h2 className="text-xl font-bold text-slate-800 tracking-tight">Kontrolni panel administratora</h2>
                 <p className="text-xs text-slate-400 mt-1">Upravljanje pravima korisnika, bazom partnera i podacima</p>
               </div>
               <button onClick={() => setOtvorenModal(null)} className="text-slate-400 hover:text-slate-600 text-xl font-bold p-1">✕</button>
             </div>
 
             <div className="space-y-8 max-h-[70vh] overflow-y-auto pr-2 no-scrollbar">
-              
-              {/* UPRAVLJANJE KOMITENTIMA */}
               <div className="border border-slate-200 rounded-2xl p-5 bg-white space-y-4">
                 <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider border-b border-slate-100 pb-2">💼 Upravljanje bazom komitenata</h3>
                 <form onSubmit={dodajIliAzurirajKomitenta} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end bg-slate-50 p-3 rounded-xl border border-slate-200">
                   <div>
                     <label className="block text-[11px] font-bold text-slate-500 mb-1">Ime *</label>
-                    <input required placeholder="Ime" value={adminKomitentNaziv} onChange={e=>setAdminKomitentNaziv(e.target.value)} className="w-full border border-slate-200 p-2 rounded-lg text-xs bg-white outline-none focus:border-blue-500" />
+                    <input required placeholder="Ime" value={adminKomitentNaziv} onChange={e=>setAdminKomitentNaziv(e.target.value)} className="w-full border border-slate-200 p-2 rounded-lg text-xs bg-white outline-none focus:border-blue-500 font-semibold" />
                   </div>
                   <div>
                     <label className="block text-[11px] font-bold text-slate-500 mb-1">Grad</label>
-                    <input placeholder="Grad" value={adminKomitentGrad} onChange={e=>setAdminKomitentGrad(e.target.value)} className="w-full border border-slate-200 p-2 rounded-lg text-xs bg-white outline-none focus:border-blue-500" />
+                    <input placeholder="Grad" value={adminKomitentGrad} onChange={e=>setAdminKomitentGrad(e.target.value)} className="w-full border border-slate-200 p-2 rounded-lg text-xs bg-white outline-none focus:border-blue-500 font-medium" />
                   </div>
                   <div>
                     <label className="block text-[11px] font-bold text-slate-500 mb-1">Tip partnera</label>
-                    <select value={adminKomitentTip} onChange={e=>setAdminKomitentTip(e.target.value)} className="w-full border border-slate-200 p-2 rounded-lg text-xs bg-white outline-none focus:border-blue-500 font-semibold">
-                      <option value="Dobavljac">👷 Dobavljač (Snabdevač)</option>
-                      <option value="Kupac">🤝 Kupac (Prodajemo mu)</option>
-                      <option value="Oboje">🔄 Obostrano (Oba tipa)</option>
+                    <select value={adminKomitentTip} onChange={e=>setAdminKomitentTip(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg text-xs bg-white outline-none focus:border-blue-500 font-semibold text-slate-700">
+                      <option value="Dobavljac">Dobavljač (Snabdevač)</option>
+                      <option value="Kupac">Kupac (Prodajemo mu)</option>
+                      <option value="Oboje">Obostrano (Oba tipa)</option>
                     </select>
                   </div>
-                  <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white text-xs py-2 rounded-lg font-bold transition-all shadow-md shadow-blue-200">{urediKomitentId ? 'Sačuvaj izmjene' : '➕ Dodaj u bazu'}</button>
+                  <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white text-xs py-2 rounded-lg font-bold transition-all shadow-md">{urediKomitentId ? 'Sačuvaj izmjene' : '➕ Dodaj u bazu'}</button>
                 </form>
 
                 <div className="border border-slate-200 rounded-xl overflow-hidden max-h-[200px] overflow-y-auto no-scrollbar">
@@ -1291,7 +1312,6 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              {/* Sekcija Korisnici */}
               <div className="border border-slate-200 rounded-2xl p-5 bg-white">
                 <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-3">👥 Uloge i dozvole korisnika</h3>
                 <div className="border border-slate-200 rounded-xl overflow-hidden bg-slate-50/50">
@@ -1320,7 +1340,6 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              {/* Sekcija Brisanje logova */}
               <div className="border border-slate-200 rounded-2xl p-5 bg-white">
                 <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-3">🧹 Istorija i reset sistema</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1349,7 +1368,6 @@ export default function Dashboard() {
                   </div>
                 </div>
               </div>
-
             </div>
             <div className="flex justify-end pt-5 mt-6 border-t border-slate-100">
               <button onClick={() => setOtvorenModal(null)} className="px-5 py-2.5 bg-slate-800 text-white rounded-xl text-sm font-bold hover:bg-slate-900 transition-colors">Zatvori panel</button>
@@ -1369,7 +1387,6 @@ export default function Dashboard() {
               <p className="text-xs text-slate-600 mt-1">Količina: <span className="font-bold">{logZaBrisanje.kolicina}</span> | Tip: {logZaBrisanje.tip.replace('_', ' ')}</p>
             </div>
             <p className="text-sm text-slate-600 mb-4">Da li ste sigurni da želite trajno obrisati ovaj zapis?</p>
-
             {logZaBrisanje.tip === 'IZLAZ_OTPREMNICA' && (
               <div className="bg-blue-50/50 border border-blue-100 p-3 rounded-xl mb-4">
                 <label className="flex items-start gap-3 cursor-pointer">
@@ -1383,7 +1400,7 @@ export default function Dashboard() {
             )}
             <div className="flex justify-end gap-3 pt-4 mt-2 border-t border-slate-100">
               <button type="button" onClick={() => setOtvorenModal('podesavanja')} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-xl transition-colors">Otkaži</button>
-              <button type="button" onClick={potvrdiBrisanjeLoga} className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-xl transition-colors shadow-md shadow-red-200">Trajno obriši</button>
+              <button type="button" onClick={potvrdiBrisanjeLoga} className="px-5 py-2 bg-red-600 text-white text-sm font-bold rounded-xl shadow-md">Trajno obriši</button>
             </div>
           </div>
         </div>
@@ -1397,21 +1414,16 @@ export default function Dashboard() {
             <p className="text-sm text-slate-500 mt-3 leading-relaxed">{potvrdaModal.poruka}</p>
             <div className="flex justify-end gap-3 pt-4 mt-5 border-t border-slate-100">
               {potvrdaModal.samoObavestenje ? (
-                <button onClick={() => setPotvrdaModal(null)} className="px-5 py-2 bg-slate-800 hover:bg-slate-900 text-white text-sm font-bold rounded-xl transition-colors">U redu</button>
+                <button onClick={() => setPotvrdaModal(null)} className="px-5 py-2 bg-slate-800 text-white text-sm font-bold rounded-xl">U redu</button>
               ) : (
                 <>
-                  <button type="button" onClick={() => setPotvrdaModal(null)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-xl transition-colors">Otkaži</button>
-                  <button type="button" onClick={() => { potvrdaModal.akcija(); }} className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-xl transition-colors">Potvrdi</button>
+                  <button type="button" onClick={() => setPotvrdaModal(null)} className="px-4 py-2 bg-slate-100 text-slate-700 text-sm font-semibold rounded-xl">Otkaži</button>
+                  <button type="button" onClick={() => { if (potvrdaModal.akcija) { potvrdaModal.akcija(); } }} className="px-5 py-2 bg-red-600 text-white text-sm font-bold rounded-xl">Potvrdi</button>
                 </>
               )}
             </div>
           </div>
         </div>
-      )}
-
-      {/* MALI PLUTAJUĆI ZUPČANIK */}
-      {jeLiAdmin && (
-        <button onClick={() => { inicijalizujAplikaciju(); setOtvorenModal('podesavanja'); }} className="fixed bottom-6 right-6 z-40 bg-slate-800 text-white p-3.5 rounded-full shadow-2xl hover:bg-slate-950 transition-all border border-slate-700/50 hover:scale-110 flex items-center justify-center text-lg" title="Kontrolni panel administratora">⚙️</button>
       )}
     </>
   );
