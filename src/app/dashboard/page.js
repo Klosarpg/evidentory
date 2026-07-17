@@ -497,47 +497,66 @@ export default function Dashboard() {
     inicijalizujAplikaciju();
   };
 
-  const generisiPDFOtpremnicu = async (stavke, kupac, grad, predao, broj, datumObj = new Date()) => {
-    const doc = new jsPDF();
-    const dan = String(datumObj.getDate()).padStart(2, '0');
-    const mesec = String(datumObj.getMonth() + 1).padStart(2, '0');
-    const godina = datumObj.getFullYear();
+ // Pomoćna funkcija koja sprečava jsPDF da lomi tekst na našim slovima
+const izbaciKvacice = (tekst) => {
+  if (!tekst) return '';
+  return tekst
+    .replace(/č/g, 'c').replace(/Č/g, 'C')
+    .replace(/ć/g, 'c').replace(/Ć/g, 'C')
+    .replace(/š/g, 's').replace(/Š/g, 'S')
+    .replace(/ž/g, 'z').replace(/Ž/g, 'Z')
+    .replace(/đ/g, 'dj').replace(/Đ/g, 'Dj');
+};
 
-    doc.setFont('Helvetica', 'normal'); doc.setFontSize(10);
-    doc.text("Montora Software d.o.o.", 14, 20); doc.text("Capital Plaza, Ul. Seika Zaida 13/L2-A06", 14, 25);
-    doc.text("81000 Podgorica, Crna Gora", 14, 30); doc.text("tel: +382 20 274 029, +382 20 274 030", 14, 35);
+const generisiPDFOtpremnicu = async (stavke, kupac, grad, predao, broj, datumObj = new Date()) => {
+  const doc = new jsPDF();
+  const dan = String(datumObj.getDate()).padStart(2, '0');
+  const mesec = String(datumObj.getMonth() + 1).padStart(2, '0');
+  const godina = datumObj.getFullYear();
 
-    try { const logoBase64 = await urlToBase64('/montora-logo.png'); if (logoBase64) doc.addImage(logoBase64, 'PNG', 135, 12, 60, 15); } catch (e) { console.error(e); }
+  doc.setFont('Helvetica', 'normal'); doc.setFontSize(10);
+  doc.text("Montora Software d.o.o.", 14, 20); doc.text("Capital Plaza, Ul. Seika Zaida 13/L2-A06", 14, 25);
+  doc.text("81000 Podgorica, Crna Gora", 14, 30); doc.text("tel: +382 20 274 029, +382 20 274 030", 14, 35);
 
-    doc.setDrawColor(220, 225, 230); doc.line(14, 43, 196, 43);
-    doc.setFont('Helvetica', 'bold'); doc.text("Kupac / Primalac:", 14, 52);
-    doc.setFont('Helvetica', 'normal'); doc.text(kupac, 14, 58); doc.text(grad, 14, 63);
-    doc.setFont('Helvetica', 'bold'); doc.text(`Otpremnica br.: ${broj}`, 120, 52);
-    doc.setFont('Helvetica', 'normal'); doc.text(`Datum: ${dan}.${mesec}.${godina}. godine`, 120, 58);
+  try { const logoBase64 = await urlToBase64('/montora-logo.png'); if (logoBase64) doc.addImage(logoBase64, 'PNG', 135, 12, 60, 15); } catch (e) { console.error(e); }
 
-    const tabeleKolone = [["Red. Br.", "Opis robe / artikla", "Kol."]];
-    const tabelaRedovi = stavke.map((st, index) => [ 
-      `${index + 1}.`, 
-      st.opis && st.opis !== '-' ? st.opis : st.naziv, 
-      st.kolicina.toString() 
-    ]);
+  doc.setDrawColor(220, 225, 230); doc.line(14, 43, 196, 43);
+  doc.setFont('Helvetica', 'bold'); doc.text("Kupac / Primalac:", 14, 52);
+  
+  // Čistimo i podatke o kupcu i gradu od kvačica radi sigurnosti layout-a
+  doc.setFont('Helvetica', 'normal'); 
+  doc.text(izbaciKvacice(kupac), 14, 58); 
+  doc.text(izbaciKvacice(grad), 14, 63);
+  
+  doc.setFont('Helvetica', 'bold'); doc.text(`Otpremnica br.: ${broj}`, 120, 52);
+  doc.setFont('Helvetica', 'normal'); doc.text(`Datum: ${dan}.${mesec}.${godina}. godine`, 120, 58);
 
-    autoTable(doc, {
-      startY: 72, head: tabeleKolone, body: tabelaRedovi, theme: 'grid',
-      headStyles: { fillColor: [240, 243, 246], textColor: [0, 0, 0], fontStyle: 'bold', lineWidth: 0.2, lineColor: [200, 200, 200] },
-      styles: { fontSize: 9, cellPadding: 4, textColor: [0, 0, 0], lineColor: [200, 200, 200] },
-      columnStyles: { 0: { cellWidth: 15, halign: 'center' }, 1: { cellWidth: 145 }, 2: { cellWidth: 20, halign: 'center', fontStyle: 'bold' } }
-    });
+  const tabeleKolone = [["Red. Br.", "Opis robe / artikla", "Kol."]];
+  
+  // OVDJE UKLANJAMO KVAČICE - Tekst se privremeno pegla u "Matricni stampaci/termalni stampaci"
+  // i tabela se više nikada neće ružiti niti skakati u novi red bez razloga!
+  const tabelaRedovi = stavke.map((st, index) => [ 
+    `${index + 1}.`, 
+    izbaciKvacice(st.opis && st.opis !== '-' ? st.opis : st.naziv), 
+    st.kolicina.toString() 
+  ]);
 
-    const finalY = doc.lastAutoTable.finalY + 30;
-    doc.setFont('Helvetica', 'normal'); doc.text(`Za ${kupac}`, 14, finalY);
-    doc.setDrawColor(180, 180, 180); doc.line(14, finalY + 10, 80, finalY + 10); doc.text("(Primio/la)", 14, finalY + 14);
-    doc.setFontSize(10); doc.text("Za Montora software d.o.o.", 120, finalY);
-    doc.setFont('Helvetica', 'bold'); doc.text(predao, 120, finalY + 6); 
-    doc.line(120, finalY + 10, 186, finalY + 10); doc.setFontSize(8); doc.text("(Predao/la)", 120, finalY + 14);
+  autoTable(doc, {
+    startY: 72, head: tabeleKolone, body: tabelaRedovi, theme: 'grid',
+    headStyles: { fillColor: [240, 243, 246], textColor: [0, 0, 0], fontStyle: 'bold', lineWidth: 0.2, lineColor: [200, 200, 200] },
+    styles: { fontSize: 9, cellPadding: 4, textColor: [0, 0, 0], lineColor: [200, 200, 200] },
+    columnStyles: { 0: { cellWidth: 15, halign: 'center' }, 1: { cellWidth: 145 }, 2: { cellWidth: 20, halign: 'center', fontStyle: 'bold' } }
+  });
 
-    doc.save(`Otpremnica_${broj.replace('/', '_')}.pdf`);
-  };
+  const finalY = doc.lastAutoTable.finalY + 30;
+  doc.setFont('Helvetica', 'normal'); doc.text(`Za ${izbaciKvacice(kupac)}`, 14, finalY);
+  doc.setDrawColor(180, 180, 180); doc.line(14, finalY + 10, 80, finalY + 10); doc.text("(Primio/la)", 14, finalY + 14);
+  doc.setFontSize(10); doc.text("Za Montora software d.o.o.", 120, finalY);
+  doc.setFont('Helvetica', 'bold'); doc.text(izbaciKvacice(predao), 120, finalY + 6); 
+  doc.line(120, finalY + 10, 186, finalY + 10); doc.setFontSize(8); doc.text("(Predao/la)", 120, finalY + 14);
+
+  doc.save(`Otpremnica_${broj.replace('/', '_')}.pdf`);
+};
 
   const otvoriPregledOtpremnice = (log) => {
     const detalji = parsirajKomentarOtpremnice(log.komentar);
