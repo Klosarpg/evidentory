@@ -103,6 +103,9 @@ export default function Dashboard() {
   const [potvrdaModal, setPotvrdaModal] = useState(null); 
 
   const [otvoreneAkcijeId, setOtvoreneAkcijeId] = useState(null);
+  
+  /* 📌 NOVI STATE: Za polje za brzi unos/skeniranje šifre na ulazu */
+  const [brzaSifraUnos, setBrzaSifraUnos] = useState('');
 
   const paziIPokreniObavestenje = (naslov, poruka) => {
     setPotvrdaModal({ naslov, poruka, samoObavestenje: true });
@@ -303,7 +306,6 @@ export default function Dashboard() {
     setOtvorenModal('brisanjeLoga');
   };
 
-  // 📌 POPRAVLJENO: Ispravljen katastrofalan tipfeler u nazivu funkcije da Next build prođe!
   const potvrdiBrisanjeLoga = async () => {
     if (!logZaBrisanje) return;
     if (vratiNaStanje && logZaBrisanje.tip === 'IZLAZ_OTPREMNICA') {
@@ -367,12 +369,51 @@ export default function Dashboard() {
     setStavkeOtpremnice(noveStavke);
   };
 
-  const dodajStavkuUlaza = () => setStavkeUlaza([...stavkeUlaza, { opremaId: oprema[0]?.id || '', kolicina: 1 }]);
+  const dodajStavkuUlaza = () => setStavkeUlaza([...stavkeUlaza, { opremaId: '', kolicina: 1 }]);
   const ukloniStavkuUlaza = (index) => setStavkeUlaza(stavkeUlaza.filter((_, i) => i !== index));
   const promeniStavkuUlaza = (index, polje, vrednost) => {
     const noveStavke = [...stavkeUlaza];
     noveStavke[index][polje] = vrednost;
     setStavkeUlaza(noveStavke);
+  };
+
+  /* 📌 NOVA FUNKCIJA: Presreće Enter, pretražuje artikle po šifri/PLU i odmah dodaje u listu ulaza */
+  const handleBrziUnosSifreUlaza = (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault(); // Sprečava preuranjenu predaju celog modala
+    
+    const trazenaSifra = brzaSifraUnos.trim().toLowerCase();
+    if (!trazenaSifra) return;
+
+    // Traži artikal upoređivanjem sa oznakom (šifrom) ili sa PLU brojem
+    const nadjenArtikal = oprema.find(o => 
+      (o.oznaka && o.oznaka.toLowerCase() === trazenaSifra) || 
+      (o.plu && o.plu.toString() === trazenaSifra)
+    );
+
+    if (!nadjenArtikal) {
+      alert(`Artikal sa šifrom ili PLU brojem "${brzaSifraUnos}" nije pronađen u bazi podataka!`);
+      return;
+    }
+
+    const indeksPostojeceg = stavkeUlaza.findIndex(s => s.opremaId == nadjenArtikal.id);
+
+    if (indeksPostojeceg !== -1) {
+      // Ako je taj artikal već na listi, samo mu povećaj količinu za 1
+      const azuriraneStavke = [...stavkeUlaza];
+      azuriraneStavke[indeksPostojeceg].kolicina = Number(azuriraneStavke[indeksPostojeceg].kolicina) + 1;
+      setStavkeUlaza(azuriraneStavke);
+    } else {
+      // Ako je trenutna jedina stavka potpuno prazna, popuni je
+      if (stavkeUlaza.length === 1 && !stavkeUlaza[0].opremaId) {
+        setStavkeUlaza([{ opremaId: nadjenArtikal.id, kolicina: 1 }]);
+      } else {
+        // Inače, dodaj novi red na dno liste
+        setStavkeUlaza([...stavkeUlaza, { opremaId: nadjenArtikal.id, kolicina: 1 }]);
+      }
+    }
+
+    setBrzaSifraUnos(''); // Prazni polje tako da možeš odmah kucati sledeću šifru
   };
 
   const izvrsiBrziUlaz = async (e) => {
@@ -402,7 +443,7 @@ export default function Dashboard() {
       }]);
     }
 
-    setOtvorenModal(null); setStavkeUlaza([{ opremaId: oprema[0]?.id || '', kolicina: 1 }]); setKomentar(''); setDobavljacId(''); setNoviDobavljacNaziv(''); setNoviDobavljacGrad('');
+    setOtvorenModal(null); setStavkeUlaza([{ opremaId: '', kolicina: 1 }]); setKomentar(''); setDobavljacId(''); setNoviDobavljacNaziv(''); setNoviDobavljacGrad('');
     inicijalizujAplikaciju();
   };
 
@@ -696,7 +737,8 @@ export default function Dashboard() {
 
               {mozeDaPovlaciIUnosi && (
                 <>
-                  <button onClick={() => { setOtvorenModal('brziUlaz'); setStavkeUlaza([{ opremaId: oprema[0]?.id || '', kolicina: 1 }]); }} className="w-full flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium hover:bg-slate-800/30 hover:text-slate-200 transition-all">📤 Prijem (Ulaz)</button>
+                  {/* 📌 POPRAVLJENO: Prijem robe se resetuje na prazan opremaId niz, tako da radi brzi unos šifre čim se otvori */}
+                  <button onClick={() => { setOtvorenModal('brziUlaz'); setStavkeUlaza([{ opremaId: '', kolicina: 1 }]); setBrzaSifraUnos(''); }} className="w-full flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium hover:bg-slate-800/30 hover:text-slate-200 transition-all">📤 Prijem (Ulaz)</button>
                   <button onClick={() => { setOtvorenModal('otpremnica'); setStavkeOtpremnice([{ opremaId: oprema[0]?.id || '', kolicina: 1, poRezervaciji: false }]); }} className="w-full flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium hover:bg-slate-800/30 hover:text-slate-200 transition-all">📥 Otpremnica (Izlaz)</button>
                   <button onClick={() => { setOtvorenModal('novaRezervacija'); setKolicinaAkcija(1); if (oprema.length > 0) setIzabraniArtikal(oprema[0]); }} className="w-full flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium hover:bg-slate-800/30 hover:text-slate-200 transition-all">🔖 Rezervacije</button>
                   <button onClick={() => {
@@ -968,7 +1010,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* MODAL: PRIJEM ROBE */}
+      {/* MODAL: PRIJEM ROBE (ULAZ) */}
       {otvorenModal === 'brziUlaz' && mozeDaPovlaciIUnosi && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 overflow-y-auto">
           <div className="bg-white p-6 rounded-2xl shadow-2xl w-full max-w-2xl border border-slate-100 my-8 animate-fade-in">
@@ -997,19 +1039,34 @@ export default function Dashboard() {
                     )}
                   </div>
 
+                  {/* 📌 NOVI ELEMENT: Interfejs za brzi unos/skeniranje šifre artikla na Enter */}
+                  <div className="bg-blue-50/40 p-4 rounded-xl border border-blue-100/60 space-y-1">
+                    <label className="block text-xs font-bold text-blue-800 uppercase tracking-wider">Brzi unos / Skeniranje po Šifri ili PLU broju</label>
+                    <div className="flex gap-2">
+                      <input 
+                        type="text" 
+                        value={brzaSifraUnos} 
+                        onChange={(e) => setBrzaSifraUnos(e.target.value)}
+                        onKeyDown={handleBrziUnosSifreUlaza}
+                        placeholder="Ukucaj šifru artikla (ili PLU) i pritisni Enter..." 
+                        className="flex-1 border border-slate-200 p-2.5 rounded-xl text-sm bg-white outline-none focus:border-blue-500 font-semibold"
+                      />
+                    </div>
+                  </div>
+
                   <div className="space-y-3">
                     <div className="flex justify-between items-center mb-2">
                       <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Stavke prijema</h3>
-                      <button type="button" onClick={dodajStavkuUlaza} className="text-xs font-bold text-blue-600 hover:text-blue-700 bg-blue-50 px-3 py-1.5 rounded-lg transition-colors">+ Dodaj artikal</button>
+                      <button type="button" onClick={dodajStavkuUlaza} className="text-xs font-bold text-blue-600 hover:text-blue-700 bg-blue-50 px-3 py-1.5 rounded-lg transition-colors">+ Dodaj ručno</button>
                     </div>
                     <div className="space-y-3 max-h-[200px] overflow-y-auto pr-2 no-scrollbar">
                       {stavkeUlaza.map((stavka, index) => (
                         <div key={index} className="flex gap-3 items-center bg-white border border-slate-200 p-3 rounded-xl shadow-sm">
                           <div className="flex-1">
                             <select value={stavka.opremaId} onChange={(e) => promeniStavkuUlaza(index, 'opremaId', e.target.value)} className="w-full border border-slate-200 p-2 text-sm bg-white outline-none focus:border-blue-500 text-slate-700 font-medium">
-                              <option value="">Izaberi artikal...</option>
+                              <option value="">Izaberi artikal sa liste...</option>
                               {oprema.map(o => (
-                                <option key={o.id} value={o.id}>{o.naziv} (Stanje: {o.kolicina})</option>
+                                <option key={o.id} value={o.id}>{o.naziv} [Šifra: {o.oznaka || '-'}] (Stanje: {o.kolicina})</option>
                               ))}
                             </select>
                           </div>
@@ -1047,7 +1104,6 @@ export default function Dashboard() {
                   </div>
                   <div>
                     <label className="block text-xs font-bold text-slate-500 mb-1">Količina za rezervaciju</label>
-                    {/* 📌 POPRAVLJENO: Riješen kritičan bag sa slovom C koji je lomio rezervacije! */}
                     <input type="number" min="1" required value={kolicinaAkcija} onChange={e=>setKolicinaAkcija(e.target.value)} className="w-full border border-slate-300 p-2.5 rounded-xl text-sm font-bold text-slate-800" />
                   </div>
                   
@@ -1112,7 +1168,6 @@ export default function Dashboard() {
                   </div>
                   <div>
                     <label className="block text-xs font-bold text-slate-500 mb-1">Količina za otkazivanje</label>
-                    {/* 📌 POPRAVLJENO: Ovdje je takođe popravljen unos količine akcije */}
                     <input type="number" min="1" required value={kolicinaAkcija} onChange={e=>setKolicinaAkcija(e.target.value)} className="w-full border border-slate-300 p-2.5 rounded-xl text-sm font-bold text-slate-800" />
                   </div>
                   <div><label className="block text-xs font-bold text-slate-500 mb-1">Razlog / Napomena</label><input placeholder="Npr. Klijent odustao" value={komentar} onChange={e=>setKomentar(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-xl text-sm font-medium outline-none" /></div>
@@ -1283,7 +1338,6 @@ export default function Dashboard() {
                   <div className="grid grid-cols-3 gap-2">
                     <div className="col-span-2">
                       <label className="block text-xs font-bold text-slate-500 mb-1">Naziv artikla *</label>
-                      {/* 📌 REVERTED: Potpuno čist, prazan originalni input bez dugih mašinskih primera, kako si i tražio */}
                       <input required value={naziv} onChange={e=>setNaziv(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-xl outline-none focus:border-blue-500 text-sm font-medium" />
                     </div>
                     <div>
@@ -1498,7 +1552,6 @@ export default function Dashboard() {
             )}
             <div className="flex justify-end gap-3 pt-4 mt-2 border-t border-slate-100">
               <button type="button" onClick={() => setOtvorenModal('podesavanja')} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-xl transition-colors">Otkaži</button>
-              {/* 📌 FIKSOVANO: Poziva se tačan naziv funkcije potvrdiBrisanjeLoga */}
               <button type="button" onClick={potvrdiBrisanjeLoga} className="px-5 py-2 bg-red-600 text-white text-sm font-bold rounded-xl shadow-md">Trajno obriši</button>
             </div>
           </div>
@@ -1507,7 +1560,7 @@ export default function Dashboard() {
 
       {/* UNIQUATNI SIGURNOSNI PROZOR */}
       {potvrdaModal && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/50 backdrop-blur-md p-4">
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
           <div className="bg-white p-6 rounded-2xl shadow-2xl w-full max-w-md border border-slate-100">
             <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">⚠️ {potvrdaModal.naslov}</h3>
             <p className="text-sm text-slate-500 mt-3 leading-relaxed">{potvrdaModal.poruka}</p>
