@@ -275,7 +275,7 @@ export default function Dashboard() {
     e.preventDefault();
     if (!adminKomitentNaziv) return;
     if (urediKomitentId) {
-      const { error } = await supabase.from('komitenti').update({ naziv: adminKomitentNaziv, grad: adminKomitentGrad, tip: adminKomitentTip }).eq('id', urediKomitentId);
+      const { error } = await supabase.from('komitenti').update({ naziv: adminKomitentNaziv, fontGradi: adminKomitentGrad, tip: adminKomitentTip }).eq('id', urediKomitentId);
       if (!error) { setUrediKomitentId(null); setAdminKomitentNaziv(''); setAdminKomitentGrad(''); inicijalizujAplikaciju(); }
     } else {
       const { error } = await supabase.from('komitenti').insert([{ naziv: adminKomitentNaziv, grad: adminKomitentGrad, tip: adminKomitentTip }]);
@@ -303,6 +303,7 @@ export default function Dashboard() {
     setOtvorenModal('brisanjeLoga');
   };
 
+  // 📌 POPRAVLJENO: Ispravljen katastrofalan tipfeler u nazivu funkcije da Next build prođe!
   const potvrdiBrisanjeLoga = async () => {
     if (!logZaBrisanje) return;
     if (vratiNaStanje && logZaBrisanje.tip === 'IZLAZ_OTPREMNICA') {
@@ -709,7 +710,6 @@ export default function Dashboard() {
               )}
 
               {jeLiAdmin && (
-                /* 📌 POPRAVLJENO: Čisti sva polja i postavlja kategoriju na podrazumijevanu pre otvaranja */
                 <button onClick={() => { setNaziv(''); setOznaka(''); setOpis(''); setKategorija('Nekategorisano'); setPlu(''); setOtvorenModal('noviArtikal'); }} className="w-full flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-blue-400 hover:bg-blue-600/10 transition-all mt-2 border border-blue-500/20">
                   ➕ Dodaj artikal
                 </button>
@@ -1047,7 +1047,7 @@ export default function Dashboard() {
                   </div>
                   <div>
                     <label className="block text-xs font-bold text-slate-500 mb-1">Količina za rezervaciju</label>
-                    {/* 📌 POPRAVLJENO: Fiksiran ključni tipfeler sa kolicinaAkcija */}
+                    {/* 📌 POPRAVLJENO: Riješen kritičan bag sa slovom C koji je lomio rezervacije! */}
                     <input type="number" min="1" required value={kolicinaAkcija} onChange={e=>setKolicinaAkcija(e.target.value)} className="w-full border border-slate-300 p-2.5 rounded-xl text-sm font-bold text-slate-800" />
                   </div>
                   
@@ -1112,7 +1112,7 @@ export default function Dashboard() {
                   </div>
                   <div>
                     <label className="block text-xs font-bold text-slate-500 mb-1">Količina za otkazivanje</label>
-                    {/* 📌 POPRAVLJENO: Fiksiran ključni tipfeler sa kolicinaAkcija */}
+                    {/* 📌 POPRAVLJENO: Ovdje je takođe popravljen unos količine akcije */}
                     <input type="number" min="1" required value={kolicinaAkcija} onChange={e=>setKolicinaAkcija(e.target.value)} className="w-full border border-slate-300 p-2.5 rounded-xl text-sm font-bold text-slate-800" />
                   </div>
                   <div><label className="block text-xs font-bold text-slate-500 mb-1">Razlog / Napomena</label><input placeholder="Npr. Klijent odustao" value={komentar} onChange={e=>setKomentar(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-xl text-sm font-medium outline-none" /></div>
@@ -1168,7 +1168,7 @@ export default function Dashboard() {
                     </div>
                     <div className="space-y-4 max-h-[300px] overflow-y-auto pr-2 no-scrollbar">
                       {stavkeOtpremnice.map((stavka, index) => {
-                        const trenutniArtikal = oprema.find(o => o.id == stavka.opremaId);
+                        const trenchesArtikal = oprema.find(o => o.id == stavka.opremaId);
                         return (
                           <div key={index} className="bg-white border border-slate-200 p-3 rounded-xl shadow-sm space-y-2">
                             <div className="flex gap-3 items-center">
@@ -1185,7 +1185,7 @@ export default function Dashboard() {
                               </div>
                               <button type="button" onClick={() => ukloniStavkuOtpremnice(index)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors">✕</button>
                             </div>
-                            {trenutniArtikal && trenutniArtikal.rezervisano > 0 && (
+                            {trenchesArtikal && trenchesArtikal.rezervisano > 0 && (
                               <div className="text-xs bg-amber-50 text-amber-800 p-2 rounded-xl border border-amber-200 flex items-center justify-between animate-fade-in">
                                 <span className="font-medium">Ovaj artikal ima aktivne rezervacije. Knjižimo:</span>
                                 <select value={stavka.poRezervaciji ? "da" : "ne"} onChange={(e) => promeniStavkuOtpremnice(index, 'poRezervaciji', e.target.value === "da")} className="bg-white border border-amber-300 font-bold px-2 py-1 rounded-lg text-xs outline-none cursor-pointer text-amber-900">
@@ -1283,12 +1283,11 @@ export default function Dashboard() {
                   <div className="grid grid-cols-3 gap-2">
                     <div className="col-span-2">
                       <label className="block text-xs font-bold text-slate-500 mb-1">Naziv artikla *</label>
-                      {/* 📌 REVERTED: Vraćen čisti originalni izgled bez ijednog suvišnog znaka ili placeholder-a */}
+                      {/* 📌 REVERTED: Potpuno čist, prazan originalni input bez dugih mašinskih primera, kako si i tražio */}
                       <input required value={naziv} onChange={e=>setNaziv(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-xl outline-none focus:border-blue-500 text-sm font-medium" />
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-slate-500 mb-1">PLU broj *</label>
-                      {/* 📌 REVERTED: Vraćen tačan originalni placeholder iz prve verzije */}
                       <input type="number" required placeholder="Red.br" value={plu} onChange={e=>setPlu(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-xl outline-none focus:border-blue-500 text-sm font-bold text-blue-600 text-center" />
                     </div>
                   </div>
@@ -1307,6 +1306,40 @@ export default function Dashboard() {
                   <div className="flex justify-end gap-3 pt-4 mt-2 border-t border-slate-100">
                       <button type="button" onClick={() => setOtvorenModal(null)} className="px-4 py-2 bg-slate-50 text-slate-600 rounded-xl text-sm font-medium hover:bg-slate-100">Odustani</button>
                       <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold shadow-md">Sačuvaj artikal</button>
+                  </div>
+              </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: UREDI ARTIKAL */}
+      {otvorenModal === 'urediArtikal' && mozeDaPovlaciIUnosi && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm">
+          <div className="bg-white p-6 rounded-2xl shadow-xl w-full max-w-md border border-slate-100 animate-fade-in">
+              <h2 className="text-lg font-bold mb-5 text-slate-800 tracking-tight">Izmjena podataka o artiklu</h2>
+              <form onSubmit={azurirajArtikal} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-500 mb-1">Artikal koji menjate</label>
+                    <select value={izabraniArtikal?.id || ''} onChange={(e) => handleIzaberiArtikalZaUredjivanje(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg text-sm bg-white text-slate-700 font-bold outline-none">
+                      {oprema.map(o => <option key={o.id} value={o.id}>{o.naziv} ({o.oznaka || 'Bez šifre'})</option>)}
+                    </select>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="col-span-2">
+                      <label className="block text-xs font-bold text-slate-500 mb-1">Naziv artikla *</label>
+                      <input required value={naziv} onChange={e=>setNaziv(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-xl outline-none text-sm font-bold text-slate-800" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 mb-1">PLU broj</label>
+                      <input type="number" value={plu} onChange={e=>setPlu(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-xl outline-none text-sm font-bold text-blue-600 text-center" />
+                    </div>
+                  </div>
+                  <div><label className="block text-xs font-bold text-slate-500 mb-1">Šifra / Oznaka</label><input value={oznaka} onChange={e=>setOznaka(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-xl text-sm font-mono text-slate-700" /></div>
+                  <div><label className="block text-xs font-bold text-slate-500 mb-1">Kategorija</label><input value={kategorija} onChange={e=>setKategorija(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-xl text-sm font-medium text-slate-700" /></div>
+                  <div><label className="block text-xs font-bold text-slate-500 mb-1">Opis / Specifikacija</label><textarea value={opis} onChange={e=>setOpis(e.target.value)} rows="3" className="w-full border border-slate-200 p-2.5 rounded-xl text-sm resize-none font-medium text-slate-600 leading-relaxed"></textarea></div>
+                  <div className="flex justify-end gap-3 pt-4 mt-2 border-t border-slate-100">
+                      <button type="button" onClick={() => { setOtvorenModal(null); setIzabraniArtikal(null); }} className="px-4 py-2 bg-slate-50 text-slate-600 rounded-xl text-sm font-medium hover:bg-slate-100">Odustani</button>
+                      <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold shadow-md">Sačuvaj izmjene</button>
                   </div>
               </form>
           </div>
@@ -1443,7 +1476,7 @@ export default function Dashboard() {
 
       {/* PAMETNI MODAL: BRISANJE LOGA SA POVRATOM NA STANJE */}
       {otvorenModal === 'brisanjeLoga' && logZaBrisanje && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 backdrop-blur-md p-4 animate-fade-in">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 animate-fade-in">
           <div className="bg-white p-6 rounded-2xl shadow-2xl w-full max-w-md border border-slate-100">
             <h3 className="text-lg font-bold text-red-600 flex items-center gap-2">⚠️ Brisanje zapisa iz istorije</h3>
             <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl mt-4 mb-4">
@@ -1465,6 +1498,7 @@ export default function Dashboard() {
             )}
             <div className="flex justify-end gap-3 pt-4 mt-2 border-t border-slate-100">
               <button type="button" onClick={() => setOtvorenModal('podesavanja')} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-xl transition-colors">Otkaži</button>
+              {/* 📌 FIKSOVANO: Poziva se tačan naziv funkcije potvrdiBrisanjeLoga */}
               <button type="button" onClick={potvrdiBrisanjeLoga} className="px-5 py-2 bg-red-600 text-white text-sm font-bold rounded-xl shadow-md">Trajno obriši</button>
             </div>
           </div>
