@@ -104,7 +104,6 @@ export default function Dashboard() {
 
   const [otvoreneAkcijeId, setOtvoreneAkcijeId] = useState(null);
   
-  /* 📌 NOVI STATE: Za polje za brzi unos/skeniranje šifre na ulazu */
   const [brzaSifraUnos, setBrzaSifraUnos] = useState('');
 
   const paziIPokreniObavestenje = (naslov, poruka) => {
@@ -377,15 +376,13 @@ export default function Dashboard() {
     setStavkeUlaza(noveStavke);
   };
 
-  /* 📌 NOVA FUNKCIJA: Presreće Enter, pretražuje artikle po šifri/PLU i odmah dodaje u listu ulaza */
   const handleBrziUnosSifreUlaza = (e) => {
     if (e.key !== 'Enter') return;
-    e.preventDefault(); // Sprečava preuranjenu predaju celog modala
+    e.preventDefault(); 
     
     const trazenaSifra = brzaSifraUnos.trim().toLowerCase();
     if (!trazenaSifra) return;
 
-    // Traži artikal upoređivanjem sa oznakom (šifrom) ili sa PLU brojem
     const nadjenArtikal = oprema.find(o => 
       (o.oznaka && o.oznaka.toLowerCase() === trazenaSifra) || 
       (o.plu && o.plu.toString() === trazenaSifra)
@@ -399,21 +396,18 @@ export default function Dashboard() {
     const indeksPostojeceg = stavkeUlaza.findIndex(s => s.opremaId == nadjenArtikal.id);
 
     if (indeksPostojeceg !== -1) {
-      // Ako je taj artikal već na listi, samo mu povećaj količinu za 1
       const azuriraneStavke = [...stavkeUlaza];
       azuriraneStavke[indeksPostojeceg].kolicina = Number(azuriraneStavke[indeksPostojeceg].kolicina) + 1;
       setStavkeUlaza(azuriraneStavke);
     } else {
-      // Ako je trenutna jedina stavka potpuno prazna, popuni je
       if (stavkeUlaza.length === 1 && !stavkeUlaza[0].opremaId) {
         setStavkeUlaza([{ opremaId: nadjenArtikal.id, kolicina: 1 }]);
       } else {
-        // Inače, dodaj novi red na dno liste
         setStavkeUlaza([...stavkeUlaza, { opremaId: nadjenArtikal.id, kolicina: 1 }]);
       }
     }
 
-    setBrzaSifraUnos(''); // Prazni polje tako da možeš odmah kucati sledeću šifru
+    setBrzaSifraUnos(''); 
   };
 
   const izvrsiBrziUlaz = async (e) => {
@@ -615,16 +609,27 @@ export default function Dashboard() {
     setPregledOtpremnice({ broj: detalji.broj, kupac: detalji.kupac, grad: detalji.grad, predao: detalji.predao, datum: new Date(log.created_at).toLocaleDateString('sr-RS'), datumObj: new Date(log.created_at), stavke: rekonstruisaneStavke });
   };
 
-  const preuzmiExcel = async () => {
+  /* 📌 POPRAVLJENO: Funkcija sada prihvata parametar za pametno filtriranje zaliha na stanju */
+  const preuzmiExcel = async (samoNaStanju = false) => {
     if (oprema.length === 0) return paziIPokreniObavestenje("Obaveštenje", "Nema podataka za eksport!");
+    
+    // Ako je proslijeđen parametar true, izbacujemo sve artikle kojih nema na stanju
+    const podaciZaEksport = samoNaStanju 
+      ? oprema.filter(item => item.kolicina > 0) 
+      : oprema;
+
+    if (podaciZaEksport.length === 0) {
+      return paziIPokreniObavestenje("Obaveštenje", "Trenutno nema nijednog artikla na stanju za eksport.");
+    }
+
     const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet('Trenutno Stanje', { views: [{ showGridLines: true }] });
+    const worksheet = workbook.addWorksheet(samoNaStanju ? 'Artikli Na Stanju' : 'Trenutno Stanje', { views: [{ showGridLines: true }] });
 
     worksheet.columns = [{ header: '', key: 'colA', width: 28 }, { header: '', key: 'colB', width: 22 }, { header: '', key: 'colC', width: 45 }, { header: '', key: 'colD', width: 22 }, { header: '', key: 'colE', width: 16 }];
     const tankiBorder = { top: { style: 'thin', color: { argb: 'FFD9D9D9' } }, left: { style: 'thin', color: { argb: 'FFD9D9D9' } }, bottom: { style: 'thin', color: { argb: 'FFD9D9D9' } }, right: { style: 'thin', color: { argb: 'FFD9D9D9' } } };
 
     worksheet.mergeCells('A1:E1');
-    worksheet.getCell('A1').value = 'IZVJEŠTAJ STANJA NA ZALIHAMA (SA REZERVACIJAMA)';
+    worksheet.getCell('A1').value = samoNaStanju ? 'IZVJEŠTAJ ARTIKALA KOJI SE NALAZE NA STANJU' : 'IZVJEŠTAJ STANJA NA ZALIHAMA (SA REZERVACIJAMA)';
     worksheet.getCell('A1').font = { name: 'Arial', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
     worksheet.getCell('A1').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F497D' } }; 
     worksheet.getCell('A1').alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
@@ -642,7 +647,7 @@ export default function Dashboard() {
       celija.border = tankiBorder;
     });
 
-    const sveKategorije = [...new Set(oprema.map(item => item.kategorija || 'Nekategorisano'))].sort();
+    const sveKategorije = [...new Set(podaciZaEksport.map(item => item.kategorija || 'Nekategorisano'))].sort();
     let trenchesRedIdx = 4;
 
     sveKategorije.forEach((kat, katIdx) => {
@@ -655,7 +660,7 @@ export default function Dashboard() {
       for (let c = 1; c <= 5; c++) worksheet.getRow(trenchesRedIdx).getCell(c).border = tankiBorder;
       trenchesRedIdx++;
 
-      const artikliUKategoriji = oprema.filter(item => (item.kategorija || 'Nekategorisano') === kat);
+      const artikliUKategoriji = podaciZaEksport.filter(item => (item.kategorija || 'Nekategorisano') === kat);
       artikliUKategoriji.sort((a, b) => (a.plu || 0) - (b.plu || 0));
 
       artikliUKategoriji.forEach(artikal => {
@@ -673,7 +678,14 @@ export default function Dashboard() {
     const buffer = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `Evidentory_Stanje_Zaliha_${new Date().toLocaleDateString('sr-RS')}.xlsx`; a.click();
+    const a = document.createElement('a'); a.href = url;
+    
+    // Dinamički dodjeljujemo naziv fajla u zavisnosti od izabranog tipa izvještaja
+    a.download = samoNaStanju
+      ? `Evidentory_Artikli_Na_Stanju_${new Date().toLocaleDateString('sr-RS')}.xlsx`
+      : `Evidentory_Stanje_Zaliha_${new Date().toLocaleDateString('sr-RS')}.xlsx`;
+    
+    a.click();
   };
 
   const formatirajDatumIVrijeme = (log) => {
@@ -737,7 +749,6 @@ export default function Dashboard() {
 
               {mozeDaPovlaciIUnosi && (
                 <>
-                  {/* 📌 POPRAVLJENO: Prijem robe se resetuje na prazan opremaId niz, tako da radi brzi unos šifre čim se otvori */}
                   <button onClick={() => { setOtvorenModal('brziUlaz'); setStavkeUlaza([{ opremaId: '', kolicina: 1 }]); setBrzaSifraUnos(''); }} className="w-full flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium hover:bg-slate-800/30 hover:text-slate-200 transition-all">📤 Prijem (Ulaz)</button>
                   <button onClick={() => { setOtvorenModal('otpremnica'); setStavkeOtpremnice([{ opremaId: oprema[0]?.id || '', kolicina: 1, poRezervaciji: false }]); }} className="w-full flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium hover:bg-slate-800/30 hover:text-slate-200 transition-all">📥 Otpremnica (Izlaz)</button>
                   <button onClick={() => { setOtvorenModal('novaRezervacija'); setKolicinaAkcija(1); if (oprema.length > 0) setIzabraniArtikal(oprema[0]); }} className="w-full flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium hover:bg-slate-800/30 hover:text-slate-200 transition-all">🔖 Rezervacije</button>
@@ -854,10 +865,15 @@ export default function Dashboard() {
                     </select>
                   </div>
 
+                  {/* 📌 POPRAVLJENO: Dodato novo minimalističko dugme sa zelenom kvačicom odmah pored starog Excel izvještaja */}
                   <div className="flex items-center gap-3 shrink-0">
-                    <button onClick={preuzmiExcel} className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-xl text-xs font-bold tracking-tight shadow-sm transition-all flex items-center gap-2">
+                    <button onClick={() => preuzmiExcel(false)} className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-xl text-xs font-bold tracking-tight shadow-sm transition-all flex items-center gap-2">
                       <svg className="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
                       Preuzmi Izvještaj Excel
+                    </button>
+                    <button onClick={() => preuzmiExcel(true)} className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-xl text-xs font-bold tracking-tight shadow-sm transition-all flex items-center gap-2">
+                      <svg className="w-3.5 h-3.5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                      Izvještaj artikala na stanju
                     </button>
                   </div>
                 </div>
@@ -1039,7 +1055,6 @@ export default function Dashboard() {
                     )}
                   </div>
 
-                  {/* 📌 NOVI ELEMENT: Interfejs za brzi unos/skeniranje šifre artikla na Enter */}
                   <div className="bg-blue-50/40 p-4 rounded-xl border border-blue-100/60 space-y-1">
                     <label className="block text-xs font-bold text-blue-800 uppercase tracking-wider">Brzi unos / Skeniranje po Šifri ili PLU broju</label>
                     <div className="flex gap-2">
@@ -1201,7 +1216,7 @@ export default function Dashboard() {
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Otpremnicu predao/la *</label>
-                      <input required placeholder="Ime Prezime" value={predaoIme} onChange={e=>setPredaoIme(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg bg-white text-sm font-semibold text-slate-800" />
+                      <input required placeholder="Ime Prezime" value={predaoIme} onChange={e=>setPrevalIme(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg bg-white text-sm font-semibold text-slate-800" />
                     </div>
                     {kupacId === 'novo' && (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:col-span-3 bg-blue-50/40 p-4 mt-3 rounded-xl border border-blue-100/60 animate-fade-in">
