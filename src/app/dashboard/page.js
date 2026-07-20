@@ -224,6 +224,11 @@ export default function Dashboard() {
   const dodajNoviArtikal = async (e) => {
     e.preventDefault();
     if (!naziv) return;
+
+    if (plu && oprema.some(o => o.plu === Number(plu))) {
+      return paziIPokreniObavestenje("Dupliran PLU", `Artikal sa PLU brojem ${plu} već postoji u bazi podataka.`);
+    }
+
     const { error } = await supabase.from('oprema').insert([{ 
       naziv, oznaka, opis, kategorija: kategorija || 'Nekategorisano', kolicina: 0, rezervisano: 0, plu: plu ? Number(plu) : 0 
     }]);
@@ -252,6 +257,11 @@ export default function Dashboard() {
   const azurirajArtikal = async (e) => {
     e.preventDefault();
     if (!izabraniArtikal || !naziv) return;
+
+    if (plu && oprema.some(o => o.plu === Number(plu) && o.id !== izabraniArtikal.id)) {
+      return paziIPokreniObavestenje("Dupliran PLU", `Ovaj PLU broj (${plu}) je već dodijeljen drugom artiklu.`);
+    }
+
     const { error } = await supabase.from('oprema').update({ naziv, oznaka, opis, kategorija, plu: plu ? Number(plu) : 0 }).eq('id', izabraniArtikal.id);
     if (!error) {
       setOtvorenModal(null); setNaziv(''); setOznaka(''); setOpis(''); setKategorija('Nekategorisano'); setPlu(''); setIzabraniArtikal(null);
@@ -360,7 +370,9 @@ export default function Dashboard() {
   };
 
   const dogodSkidanjeStavkeUlaza = () => setStavkeUlaza([...stavkeUlaza, { opremaId: oprema[0]?.id || '', kolicina: 1 }]);
+  
   const dodajStavkuOtpremnice = () => setStavkeOtpremnice([...stavkeOtpremnice, { opremaId: oprema[0]?.id || '', kolicina: 1, poRezervaciji: false }]);
+  
   const ukloniStavkuOtpremnice = (index) => setStavkeOtpremnice(stavkeOtpremnice.filter((_, i) => i !== index));
   const promeniStavkuOtpremnice = (index, polje, vrednost) => {
     const noveStavke = [...stavkeOtpremnice];
@@ -414,6 +426,10 @@ export default function Dashboard() {
     e.preventDefault();
     if (!dobavljacId) return paziIPokreniObavestenje("Upozorenje", "Izaberite dobavljača!");
     if (stavkeUlaza.length === 0 || stavkeUlaza.some(s => !s.opremaId)) return paziIPokreniObavestenje("Upozorenje", "Izaberite ispravne artikle.");
+    
+    if (stavkeUlaza.some(s => Number(s.kolicina) <= 0)) {
+      return paziIPokreniObavestenje("Neispravna količina", "Količina na prijemu mora biti striktno veća od nule.");
+    }
 
     let konacniDobavljac = '';
     if (dobavljacId === 'novo') {
@@ -443,13 +459,17 @@ export default function Dashboard() {
 
   const izvrsiRezervacijuOpreme = async (e) => {
     e.preventDefault();
-    if (!izabraniArtikal || kolicinaAkcija <= 0 || !rezervacijaKupacId) return;
+    if (!izabraniArtikal || !rezervacijaKupacId) return;
 
-    const trenchesRezervisano = izabraniArtikal.rezervisano || 0;
-    const slobodnoStanje = izabraniArtikal.kolicina - trenchesRezervisano;
+    if (Number(kolicinaAkcija) <= 0) {
+      return paziIPokreniObavestenje("Neispravna količina", "Količina za rezervaciju ne može biti nula ili u minusu.");
+    }
+
+    const trenutnoRezervisano = izabraniArtikal.rezervisano || 0;
+    const slobodnoStanje = izabraniArtikal.kolicina - trenutnoRezervisano;
 
     if (Number(kolicinaAkcija) > slobodnoStanje) {
-      return paziIPokreniObavestenje("Nema slobodnih zaliha", `Nemoguće rezervisati! Na stanju imate ukupno ${izabraniArtikal.kolicina}, od čega je već ${trenchesRezervisano} rezervisano. Slobodno za novu rezervaciju: ${slobodnoStanje}.`);
+      return paziIPokreniObavestenje("Nema slobodnih zaliha", `Nemoguće rezervisati! Na stanju imate ukupno ${izabraniArtikal.kolicina}, od čega je već ${trenutnoRezervisano} rezervisano. Slobodno za novu rezervaciju: ${slobodnoStanje}.`);
     }
 
     let konacniKupac = '';
@@ -462,7 +482,7 @@ export default function Dashboard() {
       konacniKupac = kom ? `${kom.naziv} (${kom.grad || '-'})` : 'Nepoznato';
     }
 
-    const novoRezervisanoStanje = trenchesRezervisano + Number(kolicinaAkcija);
+    const novoRezervisanoStanje = trenutnoRezervisano + Number(kolicinaAkcija);
     const { error: upError } = await supabase.from('oprema').update({ rezervisano: novoRezervisanoStanje }).eq('id', izabraniArtikal.id);
     
     if (upError) return paziIPokreniObavestenje("Greška u bazi", "Greška prilikom čuvanja rezervacije.");
@@ -479,14 +499,18 @@ export default function Dashboard() {
 
   const izvrsiOtkazivanjeRezervacije = async (e) => {
     e.preventDefault();
-    if (!izabraniArtikal || kolicinaAkcija <= 0 || !otkaziKlijentId) return alert("Popunite sva polja!");
+    if (!izabraniArtikal || !otkaziKlijentId) return alert("Popunite sva polja!");
     
-    const trenchesRezervisano = izabraniArtikal.rezervisano || 0;
-    if (Number(kolicinaAkcija) > trenchesRezervisano) {
-      return paziIPokreniObavestenje("Greška", `Pokušavate da otkažete ${kolicinaAkcija} komada, ali artikal ima samo ${trenchesRezervisano} aktivnih rezervacija.`);
+    if (Number(kolicinaAkcija) <= 0) {
+      return paziIPokreniObavestenje("Neispravna količina", "Količina za otkazivanje rezervacije mora biti veća od nule.");
     }
 
-    const novoRezervisanoStanje = Math.max(0, trenchesRezervisano - Number(kolicinaAkcija));
+    const trenutnoRezervisano = izabraniArtikal.rezervisano || 0;
+    if (Number(kolicinaAkcija) > trenutnoRezervisano) {
+      return paziIPokreniObavestenje("Greška", `Pokušavate da otkažete ${kolicinaAkcija} komada, ali artikal ima samo ${trenutnoRezervisano} aktivnih rezervacija.`);
+    }
+
+    const novoRezervisanoStanje = Math.max(0, trenutnoRezervisano - Number(kolicinaAkcija));
     await supabase.from('oprema').update({ rezervisano: novoRezervisanoStanje }).eq('id', izabraniArtikal.id);
 
     let klijentPrikaz = '';
@@ -508,6 +532,10 @@ export default function Dashboard() {
     if (!kupacId || !predaoIme) return alert("Molimo popunite sva obavezna polja.");
     if (kupacId === 'novo' && (!noviKupacNaziv || !noviKupacGrad)) return alert("Unesite naziv i grad novog kupca.");
     if (stavkeOtpremnice.length === 0 || stavkeOtpremnice.some(s => !s.opremaId)) return alert("Molimo izaberite ispravne artikle.");
+
+    if (stavkeOtpremnice.some(s => Number(s.kolicina) <= 0)) {
+      return paziIPokreniObavestenje("Neispravna količina", "Količina artikala na otpremnici ne može biti nula ili u minusu.");
+    }
 
     let konacniKupacNaziv = '';
     let konacniKupacGrad = '';
@@ -609,11 +637,9 @@ export default function Dashboard() {
     setPregledOtpremnice({ broj: detalji.broj, kupac: detalji.kupac, grad: detalji.grad, predao: detalji.predao, datum: new Date(log.created_at).toLocaleDateString('sr-RS'), datumObj: new Date(log.created_at), stavke: rekonstruisaneStavke });
   };
 
-  /* 📌 POPRAVLJENO: Funkcija sada prihvata parametar za pametno filtriranje zaliha na stanju */
   const preuzmiExcel = async (samoNaStanju = false) => {
     if (oprema.length === 0) return paziIPokreniObavestenje("Obaveštenje", "Nema podataka za eksport!");
     
-    // Ako je proslijeđen parametar true, izbacujemo sve artikle kojih nema na stanju
     const podaciZaEksport = samoNaStanju 
       ? oprema.filter(item => item.kolicina > 0) 
       : oprema;
@@ -680,7 +706,6 @@ export default function Dashboard() {
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url;
     
-    // Dinamički dodjeljujemo naziv fajla u zavisnosti od izabranog tipa izvještaja
     a.download = samoNaStanju
       ? `Evidentory_Artikli_Na_Stanju_${new Date().toLocaleDateString('sr-RS')}.xlsx`
       : `Evidentory_Stanje_Zaliha_${new Date().toLocaleDateString('sr-RS')}.xlsx`;
@@ -737,34 +762,50 @@ export default function Dashboard() {
             <div className="space-y-1">
               <p className="px-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Inventar</p>
               
-              <button onClick={() => { setAktivniTab('zalihe'); setIzabranaKategorija('Sve'); }} className={`w-full text-left px-4 py-2 rounded-xl text-xs font-semibold transition-all ${izabranaKategorija === 'Sve' && aktivniTab === 'zalihe' ? 'text-white bg-slate-800/50' : 'hover:bg-slate-800/30 hover:text-slate-200'}`}>
-                📦 Prikaži sve artikle
+              <button onClick={() => { setAktivniTab('zalihe'); setIzabranaKategorija('Sve'); }} className={`w-full text-left px-4 py-2 rounded-xl text-xs font-semibold transition-all flex items-center gap-2.5 ${izabranaKategorija === 'Sve' && aktivniTab === 'zalihe' ? 'text-white bg-slate-800/50' : 'hover:bg-slate-800/30 hover:text-slate-200'}`}>
+                <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
+                Prikaži sve artikle
               </button>
 
               <div className="pt-1 pl-3 pb-3 space-y-0.5 border-l border-slate-800/40 ml-4">
                 {[...new Set(oprema.map(item => item.kategorija || 'Nekategorisano'))].sort().map(kat => (
-                  <button key={kat} onClick={() => { setAktivniTab('zalihe'); setIzabranaKategorija(kat); }} className={`w-full text-left px-3 py-1 rounded-lg text-[11px] font-medium transition-all truncate block ${izabranaKategorija === kat && aktivniTab === 'zalihe' ? 'bg-slate-800 text-blue-400 font-semibold' : 'text-slate-500 hover:text-slate-300'}`}>▪️ {kat}</button>
+                  <button key={kat} onClick={() => { setAktivniTab('zalihe'); setIzabranaKategorija(kat); }} className={`w-full text-left px-3 py-1 rounded-lg text-[11px] font-medium transition-all truncate block ${izabranaKategorija === kat && aktivniTab === 'zalihe' ? 'bg-slate-800 text-blue-400 font-semibold' : 'text-slate-500 hover:text-slate-300'}`}>
+                    {kat}
+                  </button>
                 ))}
               </div>
 
               {mozeDaPovlaciIUnosi && (
                 <>
-                  <button onClick={() => { setOtvorenModal('brziUlaz'); setStavkeUlaza([{ opremaId: '', kolicina: 1 }]); setBrzaSifraUnos(''); }} className="w-full flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium hover:bg-slate-800/30 hover:text-slate-200 transition-all">📤 Prijem (Ulaz)</button>
-                  <button onClick={() => { setOtvorenModal('otpremnica'); setStavkeOtpremnice([{ opremaId: oprema[0]?.id || '', kolicina: 1, poRezervaciji: false }]); }} className="w-full flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium hover:bg-slate-800/30 hover:text-slate-200 transition-all">📥 Otpremnica (Izlaz)</button>
-                  <button onClick={() => { setOtvorenModal('novaRezervacija'); setKolicinaAkcija(1); if (oprema.length > 0) setIzabraniArtikal(oprema[0]); }} className="w-full flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium hover:bg-slate-800/30 hover:text-slate-200 transition-all">🔖 Rezervacije</button>
+                  <button onClick={() => { setOtvorenModal('brziUlaz'); setStavkeUlaza([{ opremaId: '', kolicina: 1 }]); setBrzaSifraUnos(''); }} className="w-full flex items-center gap-2.5 px-4 py-2 rounded-xl text-xs font-medium hover:bg-slate-800/30 hover:text-slate-200 transition-all">
+                    <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19 14l-7 7m0 0l-7-7m7 7V3"/></svg>
+                    Prijem (Ulaz)
+                  </button>
+                  <button onClick={() => { setOtvorenModal('otpremnica'); setStavkeOtpremnice([{ opremaId: oprema[0]?.id || '', kolicina: 1, poRezervaciji: false }]); }} className="w-full flex items-center gap-2.5 px-4 py-2 rounded-xl text-xs font-medium hover:bg-slate-800/30 hover:text-slate-200 transition-all">
+                    <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 10l7-7m0 0l7 7m-7-7v18"/></svg>
+                    Otpremnica (Izlaz)
+                  </button>
+                  <button onClick={() => { setOtvorenModal('novaRezervacija'); setKolicinaAkcija(1); if (oprema.length > 0) setIzabraniArtikal(oprema[0]); }} className="w-full flex items-center gap-2.5 px-4 py-2 rounded-xl text-xs font-medium hover:bg-slate-800/30 hover:text-slate-200 transition-all">
+                    <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M7 7h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                    Rezervacije
+                  </button>
                   <button onClick={() => {
                     const stavkeSaRez = oprema.filter(o => o.rezervisano > 0);
                     if (stavkeSaRez.length > 0) {
                       setIzabraniArtikal(stavkeSaRez[0]);
                       setOtvorenModal('otkaziRezervaciju'); setKolicinaAkcija(1);
                     } else { paziIPokreniObavestenje("Nema rezervacija", "Trenutno nema aktivnih rezervacija u sistemu."); }
-                  }} className="w-full flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium hover:bg-slate-800/30 hover:text-slate-200 transition-all">🔓 Otkaži rezervaciju</button>
+                  }} className="w-full flex items-center gap-2.5 px-4 py-2 rounded-xl text-xs font-medium hover:bg-slate-800/30 hover:text-slate-200 transition-all">
+                    <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z"/></svg>
+                    Otkaži rezervaciju
+                  </button>
                 </>
               )}
 
               {jeLiAdmin && (
-                <button onClick={() => { setNaziv(''); setOznaka(''); setOpis(''); setKategorija('Nekategorisano'); setPlu(''); setOtvorenModal('noviArtikal'); }} className="w-full flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-blue-400 hover:bg-blue-600/10 transition-all mt-2 border border-blue-500/20">
-                  ➕ Dodaj artikal
+                <button onClick={() => { setNaziv(''); setOznaka(''); setOpis(''); setKategorija('Nekategorisano'); setPlu(''); setOtvorenModal('noviArtikal'); }} className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-blue-400 hover:bg-blue-600/10 transition-all mt-2 border border-blue-500/20">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4"/></svg>
+                  Novi artikal
                 </button>
               )}
             </div>
@@ -772,14 +813,20 @@ export default function Dashboard() {
             {/* SEKCIJA: IZVJEŠTAJI */}
             <div className="space-y-1">
               <p className="px-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Izvještaji</p>
-              <button onClick={() => setAktivniTab('izvjestaji')} className={`w-full flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium transition-all ${aktivniTab === 'izvjestaji' ? 'bg-slate-800 text-white font-semibold' : 'hover:bg-slate-800/30 hover:text-slate-200'}`}>📈 Statistika i Promet</button>
+              <button onClick={() => setAktivniTab('izvjestaji')} className={`w-full flex items-center gap-2.5 px-4 py-2 rounded-xl text-xs font-medium transition-all ${aktivniTab === 'izvjestaji' ? 'bg-slate-800 text-white font-semibold' : 'hover:bg-slate-800/30 hover:text-slate-200'}`}>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+                Statistika i Promet
+              </button>
             </div>
 
             {/* SEKCIJA: PODEŠAVANJA */}
             {jeLiAdmin && (
               <div className="space-y-1">
                 <p className="px-4 text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Podešavanja</p>
-                <button onClick={() => setOtvorenModal('podesavanja')} className="w-full flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium hover:bg-slate-800/30 hover:text-slate-200 transition-all">⚙️ Kontrolni Panel</button>
+                <button onClick={() => setOtvorenModal('podesavanja')} className="w-full flex items-center gap-2.5 px-4 py-2 rounded-xl text-xs font-medium hover:bg-slate-800/30 hover:text-slate-200 transition-all">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                  Kontrolni Panel
+                </button>
               </div>
             )}
           </div>
@@ -805,7 +852,6 @@ export default function Dashboard() {
               <h2 className="text-xl font-bold text-slate-900 tracking-tight">EVIDENTORY Zalihe</h2>
               <p className="text-xs text-slate-400 mt-0.5">Pregled i upravljanje vašim inventarom</p>
             </div>
-            <div className="flex items-center gap-4"></div>
           </div>
 
           <div className="flex-1 overflow-y-auto p-8 space-y-6 no-scrollbar" onClick={(e) => e.stopPropagation()}>
@@ -832,7 +878,7 @@ export default function Dashboard() {
                       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Zadnji Prijem (Ulaz)</p>
                       <h3 className="text-xl font-black text-slate-900">{zadnjiUlaz.datum}</h3>
                       <p className="text-[11px] font-bold text-emerald-600 mt-1 flex items-center gap-1">
-                        ⏱️ {zadnjiUlaz.vrijeme ? `Ažurirano: ${zadnjiUlaz.vrijeme} h` : 'Nema prometa'}
+                        Ažurirano: {zadnjiUlaz.vrijeme ? `${zadnjiUlaz.vrijeme} h` : 'Nema prometa'}
                       </p>
                     </div>
                   </div>
@@ -842,7 +888,7 @@ export default function Dashboard() {
                       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Zadnji Otpis (Izlaz)</p>
                       <h3 className="text-xl font-black text-slate-900">{zadnjiIzlaz.datum}</h3>
                       <p className="text-[11px] font-bold text-rose-500 mt-1 flex items-center gap-1">
-                        ⏱️ {zadnjiIzlaz.vrijeme ? `Ažurirano: ${zadnjiIzlaz.vrijeme} h` : 'Nema prometa'}
+                        Ažurirano: {zadnjiIzlaz.vrijeme ? `${zadnjiIzlaz.vrijeme} h` : 'Nema prometa'}
                       </p>
                     </div>
                   </div>
@@ -852,7 +898,7 @@ export default function Dashboard() {
                   <div className="flex flex-wrap items-center gap-3 flex-1">
                     <div className="relative flex-1 max-w-xs">
                       <span className="absolute inset-y-0 left-3 flex items-center text-slate-400 pointer-events-none">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0z" /></svg>
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0z" /></svg>
                       </span>
                       <input type="text" placeholder="Pretraži inventar..." className="w-full bg-slate-50 border border-slate-200 pl-9 pr-10 py-2 rounded-xl text-xs font-medium outline-none focus:bg-white focus:border-blue-500 text-slate-800" value={pretraga} onChange={(e) => setPretraga(e.target.value)} />
                     </div>
@@ -865,7 +911,6 @@ export default function Dashboard() {
                     </select>
                   </div>
 
-                  {/* 📌 POPRAVLJENO: Dodato novo minimalističko dugme sa zelenom kvačicom odmah pored starog Excel izvještaja */}
                   <div className="flex items-center gap-3 shrink-0">
                     <button onClick={() => preuzmiExcel(false)} className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-xl text-xs font-bold tracking-tight shadow-sm transition-all flex items-center gap-2">
                       <svg className="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
@@ -906,7 +951,7 @@ export default function Dashboard() {
                                   <span className="text-[9px] font-bold text-amber-800 uppercase tracking-wider block">Aktivne rezervacije:</span>
                                   <div className="flex flex-wrap gap-1 mt-0.5">
                                     {dohvatiAktivneRezervacije(item.naziv, item.rezervisano).map((rez, idx) => (
-                                      <span key={idx} className="bg-white border border-amber-200 text-amber-700 text-[10px] px-2 py-0.5 rounded-md font-semibold shadow-sm">📌 {rez.klijent} ({rez.kolicina} kom)</span>
+                                      <span key={idx} className="bg-white border border-amber-200 text-amber-700 text-[10px] px-2 py-0.5 rounded-md font-semibold shadow-sm">{rez.klijent} ({rez.kolicina} kom)</span>
                                     ))}
                                   </div>
                                 </div>
@@ -938,14 +983,14 @@ export default function Dashboard() {
                                 <>
                                   <div className="fixed inset-0 z-20 cursor-default" onClick={(e) => { e.stopPropagation(); setOtvoreneAkcijeId(null); }}></div>
                                   <div className="absolute right-6 mt-1 w-44 bg-white border border-slate-200 rounded-xl shadow-xl z-30 py-1 font-semibold text-xs text-left animate-fade-in">
-                                    <button onClick={() => { otvoriUrediArtikal(item); setOtvoreneAkcijeId(null); }} className="w-full px-4 py-2 hover:bg-slate-50 text-slate-700 flex items-center gap-1.5">✏️ Uredi</button>
+                                    <button onClick={() => { otvoriUrediArtikal(item); setOtvoreneAkcijeId(null); }} className="w-full px-4 py-2 hover:bg-slate-50 text-slate-700 flex items-center gap-1.5">Uredi</button>
                                     
                                     {item.rezervisano > 0 && mozeDaPovlaciIUnosi && (
-                                      <button onClick={() => { setIzabraniArtikal(item); setOtvorenModal('otkaziRezervaciju'); setKolicinaAkcija(1); setOtvoreneAkcijeId(null); }} className="w-full px-4 py-2 hover:bg-amber-50 text-amber-600 flex items-center gap-1.5 border-t border-slate-100">🔓 Otkaži rezervaciju</button>
+                                      <button onClick={() => { setIzabraniArtikal(item); setOtvorenModal('otkaziRezervaciju'); setKolicinaAkcija(1); setOtvoreneAkcijeId(null); }} className="w-full px-4 py-2 hover:bg-amber-50 text-amber-600 flex items-center gap-1.5 border-t border-slate-100">Otkaži rezervaciju</button>
                                     )}
 
                                     {jeLiAdmin && (
-                                      <button onClick={() => { pokreniBrisanjeArtiklaDirektno(item); setOtvoreneAkcijeId(null); }} className="w-full px-4 py-2 hover:bg-red-50 text-red-600 flex items-center gap-1.5 border-t border-slate-100">✕ Ukloni</button>
+                                      <button onClick={() => { pokreniBrisanjeArtiklaDirektno(item); setOtvoreneAkcijeId(null); }} className="w-full px-4 py-2 hover:bg-red-50 text-red-600 flex items-center gap-1.5 border-t border-slate-100">Ukloni</button>
                                     )}
                                   </div>
                                 </>
@@ -1107,7 +1152,7 @@ export default function Dashboard() {
       {otvorenModal === 'novaRezervacija' && mozeDaPovlaciIUnosi && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm">
           <div className="bg-white p-6 rounded-2xl shadow-xl w-full max-w-md border border-slate-100 animate-fade-in">
-              <h2 className="text-lg font-black mb-5 text-amber-600 flex items-center gap-1.5 tracking-tight">📌 Nova Rezervacija robe</h2>
+              <h2 className="text-lg font-black mb-5 text-amber-600 flex items-center gap-1.5 tracking-tight">Nova Rezervacija robe</h2>
               <form onSubmit={izvrsiRezervacijuOpreme} className="space-y-4">
                   <div>
                     <label className="block text-xs font-bold text-slate-500 mb-1">Izaberi artikal za rezervaciju</label>
@@ -1160,12 +1205,12 @@ export default function Dashboard() {
       {otvorenModal === 'otkaziRezervaciju' && mozeDaPovlaciIUnosi && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm">
           <div className="bg-white p-6 rounded-2xl shadow-xl w-full max-w-md border border-slate-100 animate-fade-in">
-              <h2 className="text-lg font-bold mb-3 text-slate-900 flex items-center gap-1.5 tracking-tight">✕ Otkaži aktivnu rezervaciju</h2>
+              <h2 className="text-lg font-bold mb-3 text-slate-900 flex items-center gap-1.5 tracking-tight">Otkaži aktivnu rezervaciju</h2>
               <p className="text-xs text-slate-400 mb-4">Oslobodite dio ili cijelu rezervisanu količinu artikla za klijenta.</p>
               <form onSubmit={izvrsiOtkazivanjeRezervacije} className="space-y-4">
                   <div>
                     <label className="block text-xs font-bold text-slate-500 mb-1">Izaberi rezervisani artikal</label>
-                    <select required value={izabraniArtikal?.id || ''} className="w-full border border-slate-200 p-2.5 rounded-xl text-sm bg-white font-semibold text-slate-700 outline-none" onChange={(e) => setIzabraniArtikal(oprema.find(o => o.id == e.target.value))}>
+                    <select required value={izabraniArtikal?.id || ''} className="w-full border border-slate-200 p-2.5 rounded-xl text-sm bg-white font-semibold text-slate-700 outline-none" onChange={(e) => setIzabraniArtikal(oprema.filter(o => o.rezervisano > 0).find(o => o.id == e.target.value))}>
                       {oprema.filter(o => o.rezervisano > 0).length === 0 && <option value="">Nema rezervisanih artikala</option>}
                       {oprema.filter(o => o.rezervisano > 0).map(o => (
                         <option key={o.id} value={o.id}>{o.naziv} (Rezervisano: {o.rezervisano} kom)</option>
@@ -1216,7 +1261,7 @@ export default function Dashboard() {
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Otpremnicu predao/la *</label>
-                      <input required placeholder="Ime Prezime" value={predaoIme} onChange={e=>setPrevalIme(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg bg-white text-sm font-semibold text-slate-800" />
+                      <input required placeholder="Ime Prezime" value={predaoIme} onChange={e=>setPredaoIme(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg bg-white text-sm font-semibold text-slate-800" />
                     </div>
                     {kupacId === 'novo' && (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:col-span-3 bg-blue-50/40 p-4 mt-3 rounded-xl border border-blue-100/60 animate-fade-in">
@@ -1234,11 +1279,11 @@ export default function Dashboard() {
                   <div className="space-y-3">
                     <div className="flex justify-between items-center mb-3">
                       <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Stavke na otpremnici</h3>
-                      <button type="button" onClick={dodajStavkuOtpremnice} className="text-xs font-bold text-blue-600 hover:text-blue-700 bg-blue-50 px-3 py-1.5 rounded-lg transition-colors">+ Dodaj artikal</button>
+                      <button type="button" onClick={dodajStavkuOtpremnice} className="text-xs font-bold text-blue-600 hover:text-blue-700 bg-blue-50 px-3 py-1.5 rounded-lg transition-colors">+ Odaberi artikal</button>
                     </div>
                     <div className="space-y-4 max-h-[300px] overflow-y-auto pr-2 no-scrollbar">
                       {stavkeOtpremnice.map((stavka, index) => {
-                        const trenchesArtikal = oprema.find(o => o.id == stavka.opremaId);
+                        const trenutniArtikal = oprema.find(o => o.id == stavka.opremaId);
                         return (
                           <div key={index} className="bg-white border border-slate-200 p-3 rounded-xl shadow-sm space-y-2">
                             <div className="flex gap-3 items-center">
@@ -1246,7 +1291,7 @@ export default function Dashboard() {
                                 <select value={stavka.opremaId} onChange={(e) => dogodiSeIzmenaArtiklaUStavci(index, e.target.value)} className="w-full border border-slate-200 p-2 rounded-lg text-sm bg-white text-slate-700 font-medium outline-none">
                                   <option value="">Izaberi artikal...</option>
                                   {oprema.map(o => ( 
-                                    <option key={o.id} value={o.id}>{o.naziv} (Na stanju: {o.kolicina}){o.rezervisano > 0 ? ` [⚠️ Rezervisano: ${o.rezervisano}]` : ''}</option> 
+                                    <option key={o.id} value={o.id}>{o.naziv} (Na stanju: {o.kolicina}){o.rezervisano > 0 ? ` [Rezervisano: ${o.rezervisano}]` : ''}</option> 
                                   ))}
                                 </select>
                               </div>
@@ -1255,7 +1300,7 @@ export default function Dashboard() {
                               </div>
                               <button type="button" onClick={() => ukloniStavkuOtpremnice(index)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors">✕</button>
                             </div>
-                            {trenchesArtikal && trenchesArtikal.rezervisano > 0 && (
+                            {trenutniArtikal && trenutniArtikal.rezervisano > 0 && (
                               <div className="text-xs bg-amber-50 text-amber-800 p-2 rounded-xl border border-amber-200 flex items-center justify-between animate-fade-in">
                                 <span className="font-medium">Ovaj artikal ima aktivne rezervacije. Knjižimo:</span>
                                 <select value={stavka.poRezervaciji ? "da" : "ne"} onChange={(e) => promeniStavkuOtpremnice(index, 'poRezervaciji', e.target.value === "da")} className="bg-white border border-amber-300 font-bold px-2 py-1 rounded-lg text-xs outline-none cursor-pointer text-amber-900">
@@ -1338,7 +1383,7 @@ export default function Dashboard() {
             </div>
             <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-slate-100">
               <button onClick={() => setPregledOtpremnice(null)} className="px-5 py-2.5 bg-slate-100 text-slate-600 rounded-lg text-sm font-semibold hover:bg-slate-200 transition-colors">Zatvori</button>
-              <button onClick={async () => { await generisiPDFOtpremnicu(pregledOtpremnice.stavke, pregledOtpremnice.kupac, pregledOtpremnice.grad, pregledOtpremnice.predao, pregledOtpremnice.broj, pregledOtpremnice.datumObj); }} className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition-all shadow-md shadow-blue-100 flex items-center gap-2">⬇️ Preuzmi PDF</button>
+              <button onClick={async () => { await generisiPDFOtpremnicu(pregledOtpremnice.stavke, pregledOtpremnice.kupac, pregledOtpremnice.grad, pregledOtpremnice.predao, pregledOtpremnice.broj, pregledOtpremnice.datumObj); }} className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition-all shadow-md shadow-blue-100 flex items-center gap-2">Preuzmi PDF</button>
             </div>
           </div>
         </div>
@@ -1357,7 +1402,7 @@ export default function Dashboard() {
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-slate-500 mb-1">PLU broj *</label>
-                      <input type="number" required placeholder="Red.br" value={plu} onChange={e=>setPlu(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-xl outline-none focus:border-blue-500 text-sm font-bold text-blue-600 text-center" />
+                      <input type="number" min="1" required placeholder="Red.br" value={plu} onChange={e=>setPlu(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-xl outline-none focus:border-blue-500 text-sm font-bold text-blue-600 text-center" />
                     </div>
                   </div>
                   <div>
@@ -1400,7 +1445,7 @@ export default function Dashboard() {
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-slate-500 mb-1">PLU broj</label>
-                      <input type="number" value={plu} onChange={e=>setPlu(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-xl outline-none text-sm font-bold text-blue-600 text-center" />
+                      <input type="number" min="1" value={plu} onChange={e=>setPlu(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-xl outline-none text-sm font-bold text-blue-600 text-center" />
                     </div>
                   </div>
                   <div><label className="block text-xs font-bold text-slate-500 mb-1">Šifra / Oznaka</label><input value={oznaka} onChange={e=>setOznaka(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-xl text-sm font-mono text-slate-700" /></div>
@@ -1429,7 +1474,7 @@ export default function Dashboard() {
 
             <div className="space-y-8 max-h-[70vh] overflow-y-auto pr-2 no-scrollbar">
               <div className="border border-slate-200 rounded-2xl p-5 bg-white space-y-4">
-                <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider border-b border-slate-100 pb-2">💼 Upravljanje bazom komitenata</h3>
+                <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider border-b border-slate-100 pb-2">Upravljanje bazom komitenata</h3>
                 <form onSubmit={dogodiSeIzmenaKomitenta} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end bg-slate-50 p-3 rounded-xl border border-slate-200">
                   <div>
                     <label className="block text-[11px] font-bold text-slate-500 mb-1">Ime *</label>
@@ -1480,7 +1525,7 @@ export default function Dashboard() {
               </div>
 
               <div className="border border-slate-200 rounded-2xl p-5 bg-white">
-                <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-3">👥 Uloge i dozvole korisnika</h3>
+                <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-3">Uloge i dozvole korisnika</h3>
                 <div className="border border-slate-200 rounded-xl overflow-hidden bg-slate-50/50">
                   <table className="w-full text-left text-sm">
                     <thead>
@@ -1495,9 +1540,9 @@ export default function Dashboard() {
                           <td className="px-4 py-3 font-medium text-slate-700">{p.email}</td>
                           <td className="px-4 py-3 text-right">
                             <select value={p.uloga} onChange={(e) => promijeniUloguKorisnika(p.id, e.target.value)} className="border border-slate-300 px-2 py-1.5 rounded-lg text-xs bg-white font-semibold text-slate-700 outline-none focus:border-blue-500">
-                              <option value="Korisnik">👀 Korisnik (Read-only)</option>
-                              <option value="Korisnik sa pravom povlacenja">🔄 Korisnik sa pravom povlačenja</option>
-                              <option value="Admin">🔑 Admin (Sve dozvole)</option>
+                              <option value="Korisnik">Korisnik (Read-only)</option>
+                              <option value="Korisnik sa pravom povlacenja">Korisnik sa pravom povlačenja</option>
+                              <option value="Admin">Admin (Sve dozvole)</option>
                             </select>
                           </td>
                         </tr>
@@ -1508,7 +1553,7 @@ export default function Dashboard() {
               </div>
 
               <div className="border border-slate-200 rounded-2xl p-5 bg-white">
-                <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-3">🧹 Istorija i reset sistema</h3>
+                <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-3">Istorija i reset sistema</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="border border-slate-200 rounded-xl p-4 bg-white space-y-3">
                     <h4 className="text-xs font-bold text-slate-600">Obriši pojedinačni log prometa</h4>
