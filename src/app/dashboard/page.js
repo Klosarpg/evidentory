@@ -33,8 +33,9 @@ const izbaciKvacice = (tekst) => {
     .replace(/đ/g, 'dj').replace(/Đ/g, 'Dj');
 };
 
+/* 📌 POPRAVLJENO: Regex sada seče tekst tačno do uspravne crte (|) i ne hvata režim rezervacije u ime predaoca */
 const parsirajKomentarOtpremnice = (komentar) => {
-  const regex = /Broj:\s*([^\s|]+)\s*\|\s*Kupac:\s*([^|]+)\s*\|\s*Grad:\s*([^|]+)\s*\|\s*Predao:\s*(.+)/;
+  const regex = /Broj:\s*([^\s|]+)\s*\|\s*Kupac:\s*([^|]+)\s*\|\s*Grad:\s*([^|]+)\s*\|\s*Predao:\s*([^|]+)/;
   const match = komentar?.match(regex);
   if (match) {
     return {
