@@ -23,12 +23,28 @@ async function provjeriAdmina(request) {
   if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
     return { odgovor: greska('Na serveru nije podešen SUPABASE_SERVICE_ROLE_KEY.', 500) };
   }
-  const supabase = adminKlijent();
-  const token = (request.headers.get('authorization') || '').replace(/^Bearer\s+/i, '');
-  const { data, error } = await supabase.auth.getUser(token);
-  if (error || !data?.user) return { odgovor: greska('Nisi prijavljen. Prijavi se ponovo.', 401) };
 
-  const { data: profil } = await supabase.from('profili').select('uloga').eq('id', data.user.id).single();
+  // 1) Prijavu provjeravamo istim (anon) ključem koji koristi i aplikacija.
+  const token = (request.headers.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
+  if (!token) return { odgovor: greska('Nisi prijavljen (sesija nije poslata). Osvježi stranicu i probaj ponovo.', 401) };
+
+  const obican = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  const { data, error } = await obican.auth.getUser(token);
+  if (error || !data?.user) {
+    console.error('Provjera prijave nije uspjela:', error?.message);
+    return { odgovor: greska(`Prijava nije potvrđena: ${error?.message || 'nepoznat korisnik'}. Odjavi se i prijavi ponovo.`, 401) };
+  }
+
+  // 2) Uloga se čita service role ključem. Ako ovdje pukne, ključ nije ispravan.
+  const supabase = adminKlijent();
+  const { data: profil, error: profilGreska } = await supabase
+    .from('profili').select('uloga').eq('id', data.user.id).single();
+  if (profilGreska) {
+    console.error('Čitanje profila service ključem nije uspjelo:', profilGreska.message);
+    return { odgovor: greska(`SUPABASE_SERVICE_ROLE_KEY nije ispravan ili nije iz ovog projekta (${profilGreska.message}).`, 500) };
+  }
   if (profil?.uloga !== 'Admin') return { odgovor: greska('Samo administrator može upravljati korisnicima.', 403) };
 
   return { supabase };
