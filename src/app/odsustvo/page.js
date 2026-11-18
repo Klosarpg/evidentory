@@ -11,6 +11,27 @@ import {
 
 const imeIz = (email) => (email || '').split('@')[0];
 
+// Jedan stil fokusa za tastaturu na cijelom ekranu.
+const FOKUS = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2';
+
+const PUTANJE_IKONA = {
+  lijevo: 'M15 18l-6-6 6-6',
+  desno: 'M9 18l6-6-6-6',
+  nazad: 'M19 12H5m6-7l-7 7 7 7',
+  zatvori: 'M6 6l12 12M18 6L6 18',
+  slava: 'M12 3l2.2 6.8L21 12l-6.8 2.2L12 21l-2.2-6.8L3 12l6.8-2.2z',
+  upozorenje: 'M12 9v4m0 4h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z',
+  kvacica: 'M5 13l4 4L19 7',
+};
+
+function Ikona({ ime, className = 'w-4 h-4', puna = false }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill={puna ? 'currentColor' : 'none'} stroke={puna ? 'none' : 'currentColor'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d={PUTANJE_IKONA[ime]} />
+    </svg>
+  );
+}
+
 async function pozoviApi(tijelo) {
   const { data: { session } } = await supabase.auth.getSession();
   const odgovor = await fetch('/api/odsustvo', {
@@ -19,7 +40,7 @@ async function pozoviApi(tijelo) {
     body: JSON.stringify(tijelo),
   });
   const rezultat = await odgovor.json().catch(() => ({}));
-  return { ok: odgovor.ok, poruka: rezultat.error, upozorenja: rezultat.upozorenja || [] };
+  return { ok: odgovor.ok, poruka: rezultat.error, upozorenja: rezultat.upozorenja || [], podaci: rezultat };
 }
 
 async function preuzmiRjesenje(id) {
@@ -125,7 +146,17 @@ export default function Odsustvo() {
     );
   }
   if (!ja || !tab) {
-    return <main className="min-h-screen bg-slate-50 flex items-center justify-center text-sm text-slate-600">Učitavanje…</main>;
+    return (
+      <Okvir ja={ja}>
+        <div className="animate-pulse space-y-6" aria-busy="true" aria-label="Učitavanje">
+          <div className="h-28 rounded-2xl bg-slate-200/70" />
+          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_340px] gap-6">
+            <div className="h-96 rounded-2xl bg-slate-200/70" />
+            <div className="h-64 rounded-2xl bg-slate-200/70" />
+          </div>
+        </div>
+      </Okvir>
+    );
   }
 
   const d = ja.dozvole;
@@ -152,30 +183,44 @@ export default function Odsustvo() {
               className={`px-4 py-2.5 text-sm font-semibold border-b-2 -mb-px transition-colors ${tab === t.kljuc ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-600 hover:text-slate-900'}`}
             >
               {t.naziv}
-              {t.broj > 0 && <span className="ml-2 px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-900 text-xs">{t.broj}</span>}
+              {t.broj > 0 && <span className={`ml-2 px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-900 text-xs ${FOKUS}`}>{t.broj}</span>}
             </button>
           ))}
         </div>
       )}
 
-      {poruka && (
-        <div role={poruka.tip === 'greska' ? 'alert' : 'status'} className={`mb-5 p-3 rounded-xl border text-sm font-medium flex justify-between gap-4 ${poruka.tip === 'greska' ? 'bg-red-50 border-red-200 text-red-800' : 'bg-green-50 border-green-200 text-green-900'}`}>
-          <div>
-            <p>{poruka.tekst}</p>
-            {poruka.upozorenja?.length > 0 && (
-              <ul className="mt-2 space-y-1 text-amber-900 list-disc pl-5">
-                {poruka.upozorenja.map((u) => <li key={u}>{u}</li>)}
-              </ul>
-            )}
-          </div>
-          <button onClick={() => setPoruka(null)} className="font-bold opacity-70 hover:opacity-100" aria-label="Zatvori poruku">✕</button>
-        </div>
-      )}
+      {poruka && <Poruka poruka={poruka} zatvori={() => setPoruka(null)} />}
 
       {tab === 'moji' && <MojiDani {...zajedno} />}
       {tab === 'odobravanje' && <Odobravanje {...zajedno} />}
       {tab === 'svi' && <SviKorisnici {...zajedno} />}
     </Okvir>
+  );
+}
+
+function Poruka({ poruka, zatvori }) {
+  const imaUpozorenja = poruka.tip === 'uspjeh' && poruka.upozorenja?.length > 0;
+  const stil = poruka.tip === 'greska'
+    ? 'bg-red-50 border-red-200 text-red-900'
+    : imaUpozorenja ? 'bg-amber-50 border-amber-200 text-amber-950' : 'bg-green-50 border-green-200 text-green-950';
+  return (
+    <div role={poruka.tip === 'greska' ? 'alert' : 'status'} className={`mb-6 p-4 rounded-xl border text-sm flex items-start gap-3 ${stil}`}>
+      <Ikona ime={poruka.tip === 'greska' || imaUpozorenja ? 'upozorenje' : 'kvacica'} className="w-5 h-5 shrink-0 mt-px" />
+      <div className="flex-1 min-w-0">
+        <p className="font-semibold">{poruka.tekst}</p>
+        {imaUpozorenja && (
+          <>
+            <p className="mt-1">Akcija je sačuvana, ali:</p>
+            <ul className="mt-1 space-y-1 list-disc pl-5">
+              {poruka.upozorenja.map((u) => <li key={u}>{u}</li>)}
+            </ul>
+          </>
+        )}
+      </div>
+      <button onClick={zatvori} className={`p-1 -m-1 rounded-md opacity-70 hover:opacity-100 ${FOKUS}`} aria-label="Zatvori poruku">
+        <Ikona ime="zatvori" />
+      </button>
+    </div>
   );
 }
 
@@ -187,12 +232,12 @@ function Okvir({ ja, children }) {
       <header className="bg-[#0F172A] text-white">
         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between gap-4">
           <div className="flex items-center gap-4">
-            <button onClick={() => router.push('/pocetna')} className="text-sm font-semibold text-slate-300 hover:text-white">← Početna</button>
+            <button onClick={() => router.push('/pocetna')} className="flex items-center gap-1.5 text-sm font-semibold text-slate-300 hover:text-white rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"><Ikona ime="nazad" /> Početna</button>
             <h1 className="text-lg font-bold tracking-wide">Slobodni dani</h1>
           </div>
           <div className="flex items-center gap-4">
             {ja && <span className="text-sm text-slate-300">{ja.korisnickoIme}</span>}
-            <button onClick={odjava} className="text-sm font-semibold text-slate-300 hover:text-white">Odjavi se</button>
+            <button onClick={odjava} className={`text-sm font-semibold text-slate-300 hover:text-white ${FOKUS}`}>Odjavi se</button>
           </div>
         </div>
       </header>
@@ -221,6 +266,12 @@ function MojiDani({ ja, praznici, odsustva, profili, korekcije, danas, godina, a
   const kraj = odabir.do || odabir.od;
   const dani = odabir.od ? radniDani(odabir.od, kraj, praznici, slava) : [];
   const preklapanje = odabir.od && aktivna.find((o) => seKlapaju(o, { datum_od: odabir.od, datum_do: kraj }));
+  const poslije = odabir.od && tip === 'godisnji' && dani.length > 0
+    ? stanjeKorisnika({
+        odsustva: [...aktivna, { tip, status: 'na_cekanju', datum_od: odabir.od, datum_do: kraj }],
+        korekcije: mojeKorekcije, praznici, slava, godina, danas,
+      }).dostupno
+    : null;
   const kvota = odabir.od && tip === 'godisnji'
     ? provjeriKvotu({ postojeca: aktivna, novi: { tip, datum_od: odabir.od, datum_do: kraj }, korekcije: mojeKorekcije, praznici, slava, danas })
     : { ok: true };
@@ -247,7 +298,7 @@ function MojiDani({ ja, praznici, odsustva, profili, korekcije, danas, godina, a
 
   return (
     <div className="space-y-8">
-      <StanjeKartice stanje={stanje} godina={godina} />
+      <StanjePregled stanje={stanje} godina={godina} />
 
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_340px] gap-6">
         <section aria-labelledby="naslov-kalendar" className="bg-white border border-slate-200 rounded-2xl p-5">
@@ -281,7 +332,7 @@ function MojiDani({ ja, praznici, odsustva, profili, korekcije, danas, godina, a
                 <select id="tip" value={tip} onChange={(e) => setTip(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-500">
                   {Object.entries(TIPOVI).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                 </select>
-                {tip === 'neplaceno' && <p className="text-xs text-slate-600 mt-1">Neplaćeno odsustvo ne troši dane godišnjeg odmora.</p>}
+                {tip === 'neplaceno' && <p className="text-xs text-slate-600 mt-1">Plaćeno odsustvo ne troši dane godišnjeg odmora.</p>}
               </div>
               <div>
                 <label htmlFor="napomena" className="block text-xs font-bold text-slate-600 mb-1">Napomena (nije obavezno)</label>
@@ -291,10 +342,13 @@ function MojiDani({ ja, praznici, odsustva, profili, korekcije, danas, godina, a
               {preklapanje && <p role="alert" className="text-sm text-red-700">Već imaš zahtjev koji se preklapa sa ovim periodom.</p>}
               {!preklapanje && dani.length === 0 && <p role="alert" className="text-sm text-red-700">U ovom periodu nema radnih dana.</p>}
               {!preklapanje && dani.length > 0 && !kvota.ok && <p role="alert" className="text-sm text-red-700">Nemaš dovoljno dana: fali ti {kvota.fali}.</p>}
+              {!preklapanje && kvota.ok && poslije !== null && kraj.slice(0, 4) === String(godina) && (
+                <p className="text-sm text-slate-700">Poslije ovog zahtjeva ostaje ti <strong className="tabular-nums">{poslije}</strong> {poslije === 1 ? 'dan' : 'dana'}.</p>
+              )}
 
               <div className="flex gap-2">
-                <button type="button" onClick={() => setOdabir({ od: null, do: null })} className="px-4 py-2 rounded-lg text-sm font-semibold bg-slate-100 hover:bg-slate-200 text-slate-800">Poništi</button>
-                <button type="submit" disabled={slanje || dani.length === 0 || !!preklapanje || !kvota.ok} className="flex-1 px-4 py-2 rounded-lg text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white disabled:bg-slate-300 disabled:text-slate-600 disabled:cursor-not-allowed">
+                <button type="button" onClick={() => setOdabir({ od: null, do: null })} className={`px-4 py-2 rounded-lg text-sm font-semibold bg-slate-100 hover:bg-slate-200 text-slate-800 ${FOKUS}`}>Poništi</button>
+                <button type="submit" disabled={slanje || dani.length === 0 || !!preklapanje || !kvota.ok} className={`flex-1 px-4 py-2 rounded-lg text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white disabled:bg-slate-300 disabled:text-slate-600 disabled:cursor-not-allowed ${FOKUS}`}>
                   {slanje ? 'Slanje…' : 'Pošalji zahtjev'}
                 </button>
               </div>
@@ -307,35 +361,52 @@ function MojiDani({ ja, praznici, odsustva, profili, korekcije, danas, godina, a
 
       <section aria-labelledby="naslov-moji" className="bg-white border border-slate-200 rounded-2xl p-5">
         <h2 id="naslov-moji" className="text-base font-bold text-slate-900 mb-3">Moji zahtjevi</h2>
-        <ListaZahtjeva zahtjevi={moja} akcija={akcija} javiGresku={javiGresku} mojId={ja.user.id} mozeOtkazatiOdobreno={ja.dozvole.includes('odsustvo_odobravanje')} prazno="Još nemaš nijedan zahtjev." />
+        <ListaZahtjeva zahtjevi={moja} akcija={akcija} javiGresku={javiGresku} mojId={ja.user.id} mozeOtkazatiOdobreno={ja.dozvole.includes('odsustvo_odobravanje')} prazno="Još nemaš nijedan zahtjev. Izaberi dane u kalendaru iznad i pošalji ga na odobravanje." />
       </section>
     </div>
   );
 }
 
-function StanjeKartice({ stanje, godina }) {
-  const kartice = [
-    { naslov: 'Preostalo', vrijednost: stanje.preostalo, opis: stanje.naCekanju ? `${stanje.dostupno} slobodno za nove zahtjeve` : 'za korišćenje', istaknuto: true },
-    { naslov: `Godišnji ${godina}`, vrijednost: `${stanje.kvotaPreostalo} / ${stanje.kvota}`, opis: 'preostalo od ovogodišnjih' },
-    stanje.prenosIsteklo > 0
-      ? { naslov: 'Iz prošle godine', vrijednost: 0, opis: `${stanje.prenosIsteklo} dana je isteklo ${formatirajDatum(stanje.rokPrenosa)}` }
-      : { naslov: 'Iz prošle godine', vrijednost: stanje.prenosPreostalo, opis: stanje.prenos ? `važi do ${formatirajDatum(stanje.rokPrenosa)}` : 'nema prenesenih dana' },
-    { naslov: 'Iskorišćeno', vrijednost: stanje.iskoristeno, opis: `u ${godina}. godini` },
-    { naslov: 'Na čekanju', vrijednost: stanje.naCekanju, opis: 'čeka odobrenje' },
+function StanjePregled({ stanje, godina }) {
+  const prenos = stanje.prenosIsteklo > 0
+    ? { vrijednost: 0, opis: `${stanje.prenosIsteklo} isteklo ${formatirajDatum(stanje.rokPrenosa)}` }
+    : { vrijednost: stanje.prenosPreostalo, opis: stanje.prenosPreostalo > 0 ? `ističe ${formatirajDatum(stanje.rokPrenosa)}` : 'nema prenesenih' };
+  const stavke = [
+    { naziv: `Godišnji ${godina}.`, vrijednost: stanje.kvotaPreostalo, opis: `od ${stanje.kvota} dana` },
+    { naziv: `Iz ${godina - 1}. godine`, vrijednost: prenos.vrijednost, opis: prenos.opis, hitno: stanje.prenosPreostalo > 0 },
+    { naziv: 'Iskorišćeno', vrijednost: stanje.iskoristeno, opis: `u ${godina}. godini` },
+    { naziv: 'Na čekanju', vrijednost: stanje.naCekanju, opis: stanje.naCekanju ? 'čeka odobrenje' : 'nema zahtjeva' },
   ];
+
   return (
-    <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-      {kartice.map((k) => (
-        <div key={k.naslov} className={`rounded-2xl border p-4 ${k.istaknuto ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-200'}`}>
-          <p className={`text-xs font-semibold ${k.istaknuto ? 'text-blue-100' : 'text-slate-600'}`}>{k.naslov}</p>
-          <p className={`text-3xl font-bold tabular-nums mt-1 ${k.istaknuto ? 'text-white' : 'text-slate-900'}`}>{k.vrijednost}</p>
-          <p className={`text-xs mt-1 ${k.istaknuto ? 'text-blue-100' : 'text-slate-600'}`}>{k.opis}</p>
+    <section aria-label="Stanje slobodnih dana" className="bg-white border border-slate-200 rounded-2xl">
+      <div className="flex flex-col md:flex-row">
+        <div className="p-6 md:w-64 md:border-r border-b md:border-b-0 border-slate-200">
+          <p className="text-sm font-semibold text-slate-700">Preostalo slobodnih dana</p>
+          <p className="mt-1 flex items-baseline gap-2">
+            <span className="text-5xl font-bold tracking-tight tabular-nums text-slate-900">{stanje.preostalo}</span>
+            <span className="text-sm text-slate-600">{stanje.preostalo === 1 ? 'dan' : 'dana'}</span>
+          </p>
+          <p className="mt-1 text-sm text-slate-600">
+            {stanje.naCekanju > 0 ? `${stanje.dostupno} slobodno za nove zahtjeve` : 'Sve je slobodno za nove zahtjeve.'}
+          </p>
         </div>
-      ))}
+        <dl className="flex-1 grid grid-cols-2 lg:grid-cols-4">
+          {stavke.map((s, i) => (
+            <div key={s.naziv} className={`p-5 ${i > 0 ? 'lg:border-l' : ''} ${i % 2 === 1 ? 'border-l lg:border-l' : ''} ${i >= 2 ? 'border-t lg:border-t-0' : ''} border-slate-200`}>
+              <dt className="text-sm text-slate-700">{s.naziv}</dt>
+              <dd className="mt-1 text-2xl font-semibold tabular-nums text-slate-900">{s.vrijednost}</dd>
+              <dd className={`text-xs mt-0.5 ${s.hitno ? 'text-amber-800 font-semibold' : 'text-slate-600'}`}>{s.opis}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
       {stanje.prekoracenje > 0 && (
-        <p className="col-span-full text-sm text-red-700">Upisano je {stanje.prekoracenje} dana više nego što pripada. Javi se administratoru da provjeri korekciju.</p>
+        <p className="px-6 py-3 border-t border-slate-200 text-sm text-red-800 bg-red-50 rounded-b-2xl">
+          Upisano je {stanje.prekoracenje} dana više nego što pripada. Javi se administratoru da provjeri korekciju.
+        </p>
       )}
-    </div>
+    </section>
   );
 }
 
@@ -344,6 +415,7 @@ function StanjeKartice({ stanje, godina }) {
 const DANI_SEDMICE = ['Pon', 'Uto', 'Sri', 'Čet', 'Pet', 'Sub', 'Ned'];
 
 function Kalendar({ mjesec, setMjesec, praznici, slava, odsustva, odabir, onKlik, danas }) {
+  const [lebdi, setLebdi] = useState(null);
   const [g, m] = mjesec.split('-').map(Number);
   const prvi = `${mjesec}-01`;
   const brojDana = new Date(Date.UTC(g, m, 0)).getUTCDate();
@@ -352,7 +424,9 @@ function Kalendar({ mjesec, setMjesec, praznici, slava, odsustva, odabir, onKlik
     const d = new Date(Date.UTC(g, m - 1 + n, 1));
     setMjesec(d.toISOString().slice(0, 7));
   };
-  const kraj = odabir.do || odabir.od;
+  // Dok bira kraj raspona, prikaži raspon do dana iznad kojeg je miš.
+  const birakraj = odabir.od && !odabir.do && lebdi && lebdi > odabir.od;
+  const kraj = odabir.do || (birakraj ? lebdi : odabir.od);
 
   const celije = [];
   for (let i = 0; i < pomak; i++) celije.push(null);
@@ -360,13 +434,18 @@ function Kalendar({ mjesec, setMjesec, praznici, slava, odsustva, odabir, onKlik
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
-        <button onClick={() => pomjeri(-1)} className="px-3 py-1.5 rounded-lg text-sm font-semibold text-slate-700 hover:bg-slate-100" aria-label="Prethodni mjesec">‹</button>
-        <p className="text-base font-bold text-slate-900 capitalize" aria-live="polite">{NAZIVI_MJESECI[m - 1]} {g}.</p>
-        <button onClick={() => pomjeri(1)} className="px-3 py-1.5 rounded-lg text-sm font-semibold text-slate-700 hover:bg-slate-100" aria-label="Sljedeći mjesec">›</button>
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <p className="text-lg font-bold text-slate-900 capitalize" aria-live="polite">{NAZIVI_MJESECI[m - 1]} {g}.</p>
+        <div className="flex items-center gap-1">
+          {mjesec !== danas.slice(0, 7) && (
+            <button onClick={() => setMjesec(danas.slice(0, 7))} className={`px-3 py-1.5 rounded-lg text-sm font-semibold text-slate-700 hover:bg-slate-100 ${FOKUS}`}>Danas</button>
+          )}
+          <button onClick={() => pomjeri(-1)} className={`p-2 rounded-lg text-slate-700 hover:bg-slate-100 ${FOKUS}`} aria-label="Prethodni mjesec"><Ikona ime="lijevo" className="w-5 h-5" /></button>
+          <button onClick={() => pomjeri(1)} className={`p-2 rounded-lg text-slate-700 hover:bg-slate-100 ${FOKUS}`} aria-label="Sljedeći mjesec"><Ikona ime="desno" className="w-5 h-5" /></button>
+        </div>
       </div>
 
-      <div className="grid grid-cols-7 gap-1 text-center">
+      <div className="grid grid-cols-7 gap-1 text-center" onMouseLeave={() => setLebdi(null)}>
         {DANI_SEDMICE.map((d) => <div key={d} className="text-xs font-semibold text-slate-600 py-1">{d}</div>)}
         {celije.map((datum, i) => {
           if (!datum) return <div key={`p${i}`} />;
@@ -379,7 +458,7 @@ function Kalendar({ mjesec, setMjesec, praznici, slava, odsustva, odabir, onKlik
           let stil = 'bg-white text-slate-900 hover:bg-blue-50 border border-slate-200';
           let opis = '';
           if (!vrsta.radni) {
-            stil = 'bg-slate-100 text-slate-500 border border-transparent';
+            stil = 'bg-slate-100 text-slate-600 border border-transparent';
             opis = vrsta.razlog === 'praznik' ? `praznik: ${vrsta.naziv}` : vrsta.razlog === 'slava' ? 'slava' : 'vikend';
           }
           if (zahtjev) {
@@ -388,7 +467,7 @@ function Kalendar({ mjesec, setMjesec, praznici, slava, odsustva, odabir, onKlik
               : 'bg-amber-100 text-amber-900 border border-dashed border-amber-400';
             opis = `${TIPOVI[zahtjev.tip]}, ${STATUSI[zahtjev.status].toLowerCase()}`;
           }
-          if (uOdabiru) stil = 'bg-blue-100 text-blue-900 border border-blue-200';
+          if (uOdabiru) stil = birakraj ? 'bg-blue-50 text-blue-900 border border-dashed border-blue-300' : 'bg-blue-100 text-blue-900 border border-blue-200';
           if (krajnji) stil = 'bg-blue-600 text-white border border-blue-600';
           if (prosao && !zahtjev) stil += ' opacity-40';
 
@@ -398,14 +477,16 @@ function Kalendar({ mjesec, setMjesec, praznici, slava, odsustva, odabir, onKlik
               type="button"
               disabled={prosao}
               onClick={() => onKlik(datum)}
+              onMouseEnter={() => setLebdi(datum)}
+              onFocus={() => setLebdi(datum)}
               aria-pressed={krajnji || uOdabiru}
               aria-label={`${formatirajDatum(datum)}${opis ? `, ${opis}` : ''}${datum === danas ? ', danas' : ''}`}
               title={opis || undefined}
-              className={`relative h-11 rounded-lg text-sm font-semibold tabular-nums transition-colors disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${stil}`}
+              className={`relative h-12 rounded-lg text-sm font-semibold tabular-nums transition-colors duration-150 disabled:cursor-not-allowed ${FOKUS} ${stil}`}
             >
               {Number(datum.slice(8))}
               {vrsta.razlog === 'praznik' && !zahtjev && <span className="absolute bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-red-500" aria-hidden="true" />}
-              {vrsta.razlog === 'slava' && !zahtjev && <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 text-[9px] leading-none text-red-600" aria-hidden="true">✦</span>}
+              {vrsta.razlog === 'slava' && !zahtjev && <span className="absolute bottom-1 left-1/2 -translate-x-1/2 text-red-600"><Ikona ime="slava" puna className="w-2.5 h-2.5" /></span>}
               {datum === danas && !krajnji && <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-blue-600" aria-hidden="true" />}
             </button>
           );
@@ -417,7 +498,7 @@ function Kalendar({ mjesec, setMjesec, praznici, slava, odsustva, odabir, onKlik
         <li className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-amber-100 border border-dashed border-amber-400" /> Na čekanju</li>
         <li className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-slate-100" /> Vikend / praznik</li>
         <li className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-red-500" /> Praznik</li>
-        <li className="flex items-center gap-1.5"><span className="text-red-600 text-[10px]">✦</span> Slava</li>
+        <li className="flex items-center gap-1.5"><span className="text-red-600"><Ikona ime="slava" puna className="w-2.5 h-2.5" /></span> Slava</li>
       </ul>
     </div>
   );
@@ -439,7 +520,7 @@ function SlavaPolje({ profil, akcija, korisnikId, jeAdmin = false }) {
         <p className="text-xs font-bold text-slate-600">{korisnikId ? 'Slava' : 'Moja slava'}</p>
         <p className="text-slate-900 mt-1"><strong>{profil.slava_naziv || 'Slava'}</strong>, {formatirajSlavu(profil.slava_datum)}</p>
         {!jeAdmin && <p className="text-xs text-slate-600 mt-1">Taj dan je slobodan i ne troši godišnji. Promjenu radi administrator.</p>}
-        {jeAdmin && <button onClick={() => setUredjujem(true)} className="text-xs font-bold text-blue-700 hover:underline mt-1">Promijeni slavu</button>}
+        {jeAdmin && <button onClick={() => setUredjujem(true)} className={`text-xs font-bold text-blue-700 hover:underline mt-1 ${FOKUS}`}>Promijeni slavu</button>}
       </div>
     );
   }
@@ -495,8 +576,8 @@ function SlavaPolje({ profil, akcija, korisnikId, jeAdmin = false }) {
         </div>
       )}
       <div className="flex gap-2">
-        {uredjujem && <button type="button" onClick={() => setUredjujem(false)} className="px-3 py-1.5 rounded-lg text-sm font-semibold bg-slate-100 hover:bg-slate-200">Odustani</button>}
-        <button type="submit" disabled={slanje || !izbor} className="px-3 py-1.5 rounded-lg text-sm font-bold bg-slate-800 hover:bg-slate-900 text-white disabled:bg-slate-300">{slanje ? 'Čuvanje…' : 'Sačuvaj slavu'}</button>
+        {uredjujem && <button type="button" onClick={() => setUredjujem(false)} className={`px-3 py-1.5 rounded-lg text-sm font-semibold bg-slate-100 hover:bg-slate-200 ${FOKUS}`}>Odustani</button>}
+        <button type="submit" disabled={slanje || !izbor} className={`px-3 py-1.5 rounded-lg text-sm font-bold bg-slate-800 hover:bg-slate-900 text-white disabled:bg-slate-300 ${FOKUS}`}>{slanje ? 'Čuvanje…' : 'Sačuvaj slavu'}</button>
       </div>
     </form>
   );
@@ -554,12 +635,12 @@ function ListaZahtjeva({ zahtjevi, akcija, javiGresku, mojId, mozeOtkazatiOdobre
                 </td>
                 <td className="py-2.5 text-right whitespace-nowrap space-x-3">
                   {z.status === 'odobreno' && z.tip === 'godisnji' && (
-                    <button onClick={() => pdf(z)} disabled={preuzimam === z.id} className="text-sm font-semibold text-blue-700 hover:underline disabled:opacity-50">
+                    <button onClick={() => pdf(z)} disabled={preuzimam === z.id} className={`text-sm font-semibold text-blue-700 hover:underline disabled:opacity-50 ${FOKUS}`}>
                       {preuzimam === z.id ? 'Preuzimanje…' : 'Rješenje (PDF)'}
                     </button>
                   )}
                   {mozeOtkazati && (
-                    <button onClick={() => otkazi(z)} disabled={radi === z.id} className="text-sm font-semibold text-red-700 hover:underline disabled:opacity-50">
+                    <button onClick={() => otkazi(z)} disabled={radi === z.id} className={`text-sm font-semibold text-red-700 hover:underline disabled:opacity-50 ${FOKUS}`}>
                       {radi === z.id ? 'Otkazivanje…' : 'Otkaži'}
                     </button>
                   )}
@@ -582,7 +663,12 @@ function Odobravanje({ ja, praznici, odsustva, profili, korekcije, danas, godina
   const [radi, setRadi] = useState(null);
 
   if (naCekanju.length === 0) {
-    return <p className="text-sm text-slate-700 bg-white border border-slate-200 rounded-2xl p-6">Nema zahtjeva na čekanju.</p>;
+    return (
+      <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center">
+        <p className="text-base font-semibold text-slate-900">Nema zahtjeva na čekanju</p>
+        <p className="mt-1 text-sm text-slate-600">Kad neko pošalje zahtjev, pojaviće se ovdje, a odobravačima sa upisanim emailom stiže obavještenje.</p>
+      </div>
+    );
   }
 
   const obradi = async (z, vrsta) => {
@@ -645,10 +731,10 @@ function Odobravanje({ ja, praznici, odsustva, profili, korekcije, danas, godina
                   <input id={`kom-${z.id}`} maxLength={500} value={komentari[z.id] || ''} onChange={(e) => setKomentari((k) => ({ ...k, [z.id]: e.target.value }))} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-500" />
                 </div>
                 <div className="flex gap-2">
-                  <button onClick={() => obradi(z, 'odbij')} disabled={!!radi} className="px-4 py-2 rounded-lg text-sm font-bold bg-white border border-red-300 text-red-700 hover:bg-red-50 disabled:opacity-50">
+                  <button onClick={() => obradi(z, 'odbij')} disabled={!!radi} className={`px-4 py-2 rounded-lg text-sm font-bold bg-white border border-red-300 text-red-700 hover:bg-red-50 disabled:opacity-50 ${FOKUS}`}>
                     {radi === `${z.id}-odbij` ? 'Odbijanje…' : 'Odbij'}
                   </button>
-                  <button onClick={() => obradi(z, 'odobri')} disabled={!!radi} className="px-4 py-2 rounded-lg text-sm font-bold bg-green-700 hover:bg-green-800 text-white disabled:opacity-50">
+                  <button onClick={() => obradi(z, 'odobri')} disabled={!!radi} className={`px-4 py-2 rounded-lg text-sm font-bold bg-green-700 hover:bg-green-800 text-white disabled:opacity-50 ${FOKUS}`}>
                     {radi === `${z.id}-odobri` ? 'Odobravanje…' : 'Odobri'}
                   </button>
                 </div>
@@ -668,6 +754,15 @@ function SviKorisnici({ ja, praznici, odsustva, profili, korekcije, danas, godin
   const [pretraga, setPretraga] = useState('');
   const jeAdmin = ja.dozvole.includes('admin');
   const jeOdobravac = ja.dozvole.includes('odsustvo_odobravanje');
+  const [jmbgovi, setJmbgovi] = useState({});
+
+  // Admin vidi samo maskirane JMBG-ove (zadnje 4 cifre).
+  const ucitajJmbgove = useCallback(async () => {
+    if (!jeAdmin) return;
+    const r = await pozoviApi({ akcija: 'jmbg_pregled' });
+    if (r.ok) setJmbgovi(r.podaci.jmbg || {});
+  }, [jeAdmin]);
+  useEffect(() => { ucitajJmbgove(); }, [ucitajJmbgove]);
 
   const redovi = useMemo(() => profili
     .map((p) => {
@@ -718,7 +813,7 @@ function SviKorisnici({ ja, praznici, odsustva, profili, korekcije, danas, godin
                   <td className="py-2.5 pr-4 text-right tabular-nums">{stanje.naCekanju}</td>
                   <td className="py-2.5 pr-4 text-right tabular-nums font-bold text-slate-900">{stanje.preostalo}</td>
                   <td className="py-2.5 text-right">
-                    <button onClick={() => setOtvoren(otvoren === p.id ? null : p.id)} aria-expanded={otvoren === p.id} className="text-sm font-semibold text-blue-700 hover:underline">
+                    <button onClick={() => setOtvoren(otvoren === p.id ? null : p.id)} aria-expanded={otvoren === p.id} className={`text-sm font-semibold text-blue-700 hover:underline ${FOKUS}`}>
                       {otvoren === p.id ? 'Sakrij' : 'Detalji'}
                     </button>
                   </td>
@@ -727,9 +822,10 @@ function SviKorisnici({ ja, praznici, odsustva, profili, korekcije, danas, godin
                   <tr>
                     <td colSpan={6} className="bg-slate-50 px-4 py-4">
                       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_300px] gap-6">
-                        <ListaZahtjeva zahtjevi={njegova} akcija={akcija} javiGresku={javiGresku} mojId={ja.user.id} mozeOtkazatiOdobreno={jeOdobravac} prazno="Nema zahtjeva." />
+                        <ListaZahtjeva zahtjevi={njegova} akcija={akcija} javiGresku={javiGresku} mojId={ja.user.id} mozeOtkazatiOdobreno={jeOdobravac} prazno="Ovaj korisnik još nema zahtjeva." />
                         <div className="space-y-5">
                           {jeAdmin && <PodaciForma profil={p} akcija={akcija} />}
+                          {jeAdmin && <JmbgForma korisnikId={p.id} maskiran={jmbgovi[p.id]} akcija={akcija} osvjezi={ucitajJmbgove} />}
                           <SlavaPolje profil={p} akcija={akcija} korisnikId={p.id} jeAdmin={jeAdmin} />
                           {jeAdmin && <KorekcijaForma korisnikId={p.id} godina={godina} postojeca={korekcije.find((k) => k.korisnik_id === p.id && k.godina === godina)} akcija={akcija} />}
                         </div>
@@ -775,7 +871,7 @@ function KorekcijaForma({ korisnikId, godina, postojeca, akcija }) {
           <input id={`kor-prenos-${korisnikId}`} type="number" min={0} max={365} value={prenos} onChange={(e) => setPrenos(e.target.value)} className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm tabular-nums" />
         </div>
       </div>
-      <button type="submit" disabled={slanje} className="px-3 py-1.5 rounded-lg text-sm font-bold bg-slate-800 hover:bg-slate-900 text-white disabled:bg-slate-300">{slanje ? 'Čuvanje…' : 'Sačuvaj korekciju'}</button>
+      <button type="submit" disabled={slanje} className={`px-3 py-1.5 rounded-lg text-sm font-bold bg-slate-800 hover:bg-slate-900 text-white disabled:bg-slate-300 ${FOKUS}`}>{slanje ? 'Čuvanje…' : 'Sačuvaj korekciju'}</button>
     </form>
   );
 }
@@ -825,7 +921,57 @@ function PodaciForma({ profil, akcija }) {
         </div>
       </div>
       <p className="text-xs text-slate-600">JMBG se ne čuva u aplikaciji; upisuje se ručno na odštampano rješenje.</p>
-      <button type="submit" disabled={slanje} className="px-3 py-1.5 rounded-lg text-sm font-bold bg-slate-800 hover:bg-slate-900 text-white disabled:bg-slate-300">{slanje ? 'Čuvanje…' : 'Sačuvaj podatke'}</button>
+      <button type="submit" disabled={slanje} className={`px-3 py-1.5 rounded-lg text-sm font-bold bg-slate-800 hover:bg-slate-900 text-white disabled:bg-slate-300 ${FOKUS}`}>{slanje ? 'Čuvanje…' : 'Sačuvaj podatke'}</button>
+    </form>
+  );
+}
+
+function JmbgForma({ korisnikId, maskiran, akcija, osvjezi }) {
+  const [unos, setUnos] = useState('');
+  const [uredjujem, setUredjujem] = useState(false);
+  const [slanje, setSlanje] = useState(false);
+  const polje = 'w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm bg-white tabular-nums tracking-wider';
+
+  const sacuvaj = async (vrijednost) => {
+    setSlanje(true);
+    const ok = await akcija({ akcija: 'jmbg', korisnikId, jmbg: vrijednost }, vrijednost ? 'JMBG je sačuvan.' : 'JMBG je uklonjen.');
+    setSlanje(false);
+    if (ok) { setUnos(''); setUredjujem(false); osvjezi(); }
+  };
+
+  if (maskiran && !uredjujem) {
+    return (
+      <div className="text-sm">
+        <p className="text-xs font-bold text-slate-600">JMBG</p>
+        <p className="mt-1 font-semibold tabular-nums tracking-wider text-slate-900">{maskiran}</p>
+        <div className="mt-1 flex gap-3">
+          <button onClick={() => setUredjujem(true)} className={`text-xs font-bold text-blue-700 hover:underline rounded ${FOKUS}`}>Promijeni</button>
+          <button onClick={() => sacuvaj('')} disabled={slanje} className={`text-xs font-bold text-red-700 hover:underline rounded disabled:opacity-50 ${FOKUS}`}>Ukloni</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); sacuvaj(unos); }} className="space-y-2">
+      <label htmlFor={`jmbg-${korisnikId}`} className="block text-xs font-bold text-slate-600">JMBG</label>
+      <input
+        id={`jmbg-${korisnikId}`}
+        inputMode="numeric"
+        autoComplete="off"
+        required
+        pattern="[0-9]{13}"
+        maxLength={13}
+        title="13 cifara"
+        value={unos}
+        onChange={(e) => setUnos(e.target.value.replace(/[^0-9]/g, ''))}
+        className={polje}
+      />
+      <p className="text-xs text-slate-600">Upisuje se na rješenje. U aplikaciji se poslije prikazuje samo zadnje 4 cifre.</p>
+      <div className="flex gap-2">
+        {uredjujem && <button type="button" onClick={() => setUredjujem(false)} className={`px-3 py-1.5 rounded-lg text-sm font-semibold bg-slate-100 hover:bg-slate-200 ${FOKUS}`}>Odustani</button>}
+        <button type="submit" disabled={slanje || unos.length !== 13} className={`px-3 py-1.5 rounded-lg text-sm font-bold bg-slate-800 hover:bg-slate-900 text-white disabled:bg-slate-300 ${FOKUS}`}>{slanje ? 'Čuvanje…' : 'Sačuvaj JMBG'}</button>
+      </div>
     </form>
   );
 }

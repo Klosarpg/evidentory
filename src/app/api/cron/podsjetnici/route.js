@@ -5,8 +5,8 @@ import { adresaAplikacije, podsjetnikSlava, podsjetnikPrenos } from '@/lib/obavj
 
 // Dnevni podsjetnici (Vercel Cron, vidi vercel.json):
 //  - 5 dana prije slave: podsjetnik korisniku
-//  - 1. maja: ko ima neiskorišćene dane iz prošle godine (ističu 30. juna)
-// Ručni test: /api/cron/podsjetnici?danas=2027-05-01 (sa Authorization: Bearer CRON_SECRET)
+//  - 30. decembra (6 mjeseci prije isteka): ko ima neiskorišćene dane iz ove godine (ističu 30. juna sljedeće)
+// Ručni test: /api/cron/podsjetnici?danas=2026-12-30 (sa Authorization: Bearer CRON_SECRET)
 
 export async function GET(request) {
   const tajna = process.env.CRON_SECRET;
@@ -37,8 +37,8 @@ export async function GET(request) {
       izvjestaj.slava++;
     }
 
-    // 2) 1. maj: dani iz prošle godine
-    if (danas.slice(5) === '05-01') {
+    // 2) 30. decembar: neiskorišćeni dani ove godine prelaze u sljedeću i važe do 30. juna
+    if (danas.slice(5) === '12-30') {
       const { data: praznici } = await supabase.from('praznici').select('datum, naziv');
       const mapaPraznika = new Map((praznici || []).map((x) => [x.datum, x.naziv]));
       const { data: odsustva } = await supabase.from('odsustva').select('*').in('status', ['odobreno', 'na_cekanju']);
@@ -51,7 +51,7 @@ export async function GET(request) {
         const stanje = stanjeKorisnika({
           odsustva: (odsustva || []).filter((o) => o.korisnik_id === p.id),
           korekcije: (korekcije || []).filter((k) => k.korisnik_id === p.id),
-          praznici: mapaPraznika, slava: p.slava_datum, godina, danas,
+          praznici: mapaPraznika, slava: p.slava_datum, godina: godina + 1, danas,
         });
         if (stanje.prenosPreostalo > 0) {
           izvjestaj.upozorenja.push(...await podsjetnikPrenos(p, stanje, adresa));

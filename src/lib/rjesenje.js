@@ -4,7 +4,8 @@ import { FIRMA } from '@/lib/firma';
 import { GODISNJA_KVOTA } from '@/lib/odsustvo';
 
 // PDF "Rješenje o korišćenju godišnjeg odmora" po šablonu firme.
-// JMBG i potpis ostaju prazne linije za ručni unos.
+// JMBG se upisuje ako je unesen u aplikaciji, inače ostaje prazna linija.
+// Pečat i potpis se stavljaju ako su postavljeni u Supabase Storage (bucket "firma"), inače ostaje linija za potpis i M.P.
 
 const MJESECI_GENITIV = ['januara', 'februara', 'marta', 'aprila', 'maja', 'juna', 'jula', 'avgusta', 'septembra', 'oktobra', 'novembra', 'decembra'];
 const REDNI = ['prvi', 'drugi', 'treći', 'četvrti', 'peti', 'šesti', 'sedmi', 'osmi', 'deveti', 'deseti'];
@@ -40,7 +41,8 @@ export function redniDio(n) {
 
 // zahtjev: red iz "odsustva"; profil: { ime_prezime, radno_mjesto, pol, radni_odnos }
 // broj: broj rješenja; datum: 'YYYY-MM-DD'; redni: koji je ovo dio odmora u godini (1, 2, …)
-export function napraviRjesenje({ zahtjev, profil, broj, datum, redni }) {
+// jmbg: string ili null; slike: { potpis?, pecat? } iz ucitajSlikeFirme
+export function napraviRjesenje({ zahtjev, profil, broj, datum, redni, jmbg = null, slike = {} }) {
   const zenski = profil.pol === 'Ž';
   const ime = profil.ime_prezime || zahtjev.korisnik_ime;
   const radnoMjesto = profil.radno_mjesto || '________________________________';
@@ -96,7 +98,7 @@ export function napraviRjesenje({ zahtjev, profil, broj, datum, redni }) {
   pasus('O KORIŠĆENJU GODIŠNJEG ODMORA', { align: 'center', bold: true, razmak: 5 });
 
   pasus(
-    `1. ${ime} JMBG ____________________, raspoređen${zenski ? 'a' : ''} na radno mjesto ${radnoMjesto}, ` +
+    `1. ${ime} JMBG ${jmbg || '____________________'}, raspoređen${zenski ? 'a' : ''} na radno mjesto ${radnoMjesto}, ` +
     `ima pravo na godišnji odmor za ${godina}. godinu u ukupnom trajanju od ${radnihDana(GODISNJA_KVOTA)}.`,
     { razmak: 4 }
   );
@@ -158,8 +160,27 @@ export function napraviRjesenje({ zahtjev, profil, broj, datum, redni }) {
   doc.setLineWidth(0.3);
   doc.line(desno - sirinaPotpisa, yLinija, desno, yLinija);
   doc.setFontSize(9);
-  doc.text('M.P.', desno - sirinaPotpisa - 14, yLinija);
   doc.text('potpis', sredinaPotpisa, yLinija + 4.5, { align: 'center' });
+
+  const slika = (s) => `data:image/${s.format === 'PNG' ? 'png' : 'jpeg'};base64,${s.base64}`;
+  // Pečat lijevo od potpisa, preko početka linije (kao na originalu). Bez pečata ostaje oznaka M.P.
+  if (slike.pecat) {
+    const sirina = 34;
+    const visina = Math.min(34, (sirina * slike.pecat.visina) / slike.pecat.sirina);
+    const s = (visina * slike.pecat.sirina) / slike.pecat.visina;
+    doc.addImage(slika(slike.pecat), slike.pecat.format, desno - sirinaPotpisa - s / 2, yLinija - visina / 2 - 4, s, visina);
+  } else {
+    doc.text('M.P.', desno - sirinaPotpisa - 14, yLinija);
+  }
+  // Potpis centriran na liniji, malo spušten preko nje.
+  if (slike.potpis) {
+    const maksSirina = 55;
+    const maksVisina = 20;
+    const odnos = slike.potpis.sirina / slike.potpis.visina;
+    const s = Math.min(maksSirina, maksVisina * odnos);
+    const v = s / odnos;
+    doc.addImage(slika(slike.potpis), slike.potpis.format, sredinaPotpisa - s / 2, yLinija - v + 3, s, v);
+  }
 
   return Buffer.from(doc.output('arraybuffer'));
 }

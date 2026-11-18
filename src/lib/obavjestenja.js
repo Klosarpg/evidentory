@@ -1,6 +1,7 @@
 import { posaljiEmail } from '@/lib/email';
 import { napraviRjesenje, nazivFajlaRjesenja } from '@/lib/rjesenje';
 import { TIPOVI, formatirajDatum, formatirajSlavu } from '@/lib/odsustvo';
+import { ucitajSlikeFirme, ucitajJmbg } from '@/lib/slikeFirme';
 
 // Ko dobija koji email za slobodne dane. Sve funkcije vraćaju listu upozorenja (prazna = sve poslato).
 
@@ -103,7 +104,9 @@ export async function obavijestiObradjen(supabase, zahtjev, adresa, { rjesenje }
         naslov: `Rješenje za štampu: ${zahtjev.korisnik_ime}, ${period(zahtjev)}`,
         sadrzaj: {
           naslov: 'Rješenje o godišnjem odmoru za štampu',
-          uvod: `U prilogu je rješenje br. ${rjesenje.broj}. Odštampaj ga, upiši JMBG, potpiši i ovjeri pečatom.`,
+          uvod: rjesenje.imaPecat
+            ? `U prilogu je rješenje br. ${rjesenje.broj}, sa pečatom i potpisom. Odštampaj ga za dosije.`
+            : `U prilogu je rješenje br. ${rjesenje.broj}. Odštampaj ga, potpiši i ovjeri pečatom.`,
           redovi,
         },
         prilozi,
@@ -149,8 +152,12 @@ export async function pripremiRjesenje(supabase, zahtjev, datum) {
     .gte('datum_od', `${godina}-01-01`).lte('datum_od', `${godina}-12-31`);
   const redni = (raniji || []).filter((o) => o.id !== zahtjev.id && o.datum_od < zahtjev.datum_od).length + 1;
 
-  const pdf = napraviRjesenje({ zahtjev, profil: profil || {}, broj, datum: datumRjesenja, redni });
-  return { broj, datum: datumRjesenja, pdf, naziv: nazivFajlaRjesenja(zahtjev, broj), nedostajuPodaci: !profil?.ime_prezime || !profil?.radno_mjesto };
+  const [jmbg, slike] = await Promise.all([
+    ucitajJmbg(supabase, zahtjev.korisnik_id),
+    ucitajSlikeFirme(supabase).catch((e) => { console.warn('Pečat/potpis nisu učitani:', e.message); return {}; }),
+  ]);
+  const pdf = napraviRjesenje({ zahtjev, profil: profil || {}, broj, datum: datumRjesenja, redni, jmbg, slike });
+  return { broj, datum: datumRjesenja, pdf, naziv: nazivFajlaRjesenja(zahtjev, broj), nedostajuPodaci: !profil?.ime_prezime || !profil?.radno_mjesto, imaPecat: Boolean(slike.pecat && slike.potpis) };
 }
 
 // Podsjetnik za slavu (5 dana ranije).
@@ -168,18 +175,19 @@ export async function podsjetnikSlava(korisnik, datumSlave, adresa) {
   return upozorenje(r, korisnik.kontakt_email);
 }
 
-// Podsjetnik 1. maja: neiskorišćeni dani iz prošle godine ističu 30. juna.
+// Podsjetnik 30. decembra: neiskorišćeni dani ove godine važe još do 30. juna sljedeće godine.
+// stanje je izračunato za sljedeću godinu, pa je "prenos" upravo ovogodišnji ostatak.
 export async function podsjetnikPrenos(korisnik, stanje, adresa) {
   const r = await posaljiEmail({
     prima: korisnik.kontakt_email,
     naslov: `Imaš ${stanje.prenosPreostalo} neiskorišćenih dana koji ističu ${formatirajDatum(stanje.rokPrenosa)}`,
     sadrzaj: {
       naslov: 'Iskoristi preostale slobodne dane',
-      uvod: `Imaš ${stanje.prenosPreostalo} neiskorišćenih dana godišnjeg odmora iz ${stanje.godina - 1}. godine. Iskoristi ih do ${formatirajDatum(stanje.rokPrenosa)}, inače propadaju.`,
+      uvod: `Imaš ${stanje.prenosPreostalo} neiskorišćenih dana godišnjeg odmora iz ${stanje.godina - 1}. godine. Prenose se u ${stanje.godina}. godinu, ali važe samo do ${formatirajDatum(stanje.rokPrenosa)}. Iskoristi ih do tada, inače propadaju.`,
       redovi: [
-        ['Iz prošle godine', String(stanje.prenosPreostalo)],
-        [`Godišnji ${stanje.godina}`, `${stanje.kvotaPreostalo} od ${stanje.kvota}`],
-        ['Ukupno preostalo', String(stanje.preostalo)],
+        [`Neiskorišćeno iz ${stanje.godina - 1}.`, String(stanje.prenosPreostalo)],
+        ['Važi do', formatirajDatum(stanje.rokPrenosa)],
+        [`Novi godišnji za ${stanje.godina}.`, `${stanje.kvota} dana`],
       ],
       dugme: { tekst: 'Zatraži slobodne dane', adresa: `${adresa}/odsustvo` },
     },

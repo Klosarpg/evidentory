@@ -7,6 +7,7 @@ import {
 import {
   adresaAplikacije, obavijestiNoviZahtjev, obavijestiObradjen, obavijestiOtkazanOdobren, pripremiRjesenje,
 } from '@/lib/obavjestenja';
+import { jeIspravanJmbg, maskirajJmbg } from '@/lib/slikeFirme';
 
 // POST /api/odsustvo  { akcija, ... }
 //   zahtjev    { tip, datumOd, datumDo, napomena }      dozvola: odsustvo_zahtjev
@@ -16,6 +17,8 @@ import {
 //   slava      { slavaDatum, slavaNaziv, korisnikId? }  sam jednom; admin bilo kad i bilo kome
 //   korekcija  { korisnikId, godina, dana, prenos, napomena }  dozvola: admin
 //   podaci     { korisnikId, imePrezime, radnoMjesto, pol, radniOdnos }  dozvola: admin (podaci za rješenje)
+//   jmbg       { korisnikId, jmbg }   dozvola: admin; prazan jmbg briše upis
+//   jmbg_pregled                      dozvola: admin; vraća samo maskirane JMBG-ove
 // GET /api/odsustvo?rjesenje=ID  → PDF rješenja (vlasnik, odobravač, pregled svih ili prima dokument)
 //
 // Odgovor može imati "upozorenja": akcija je uspjela, ali npr. email nije poslat.
@@ -41,6 +44,9 @@ async function ucitajKontekst(supabase, korisnikId) {
 
 function porukaZaBazu(e) {
   const m = e?.message || String(e);
+  if (/zaposleni_jmbg/.test(m) && /(does not exist|schema cache|not find)/i.test(m)) {
+    return 'Tabela za JMBG ne postoji. Pokreni SQL "jmbg-pecat.sql" u Supabase-u.';
+  }
   if (/odsustva|praznici|korekcije|slava_datum|ime_prezime|radno_mjesto|broj_rjesenja/.test(m) && /(does not exist|schema cache|not find)/i.test(m)) {
     return 'Tabele za slobodne dane ne postoje. Pokreni SQL "odsustvo.sql" u Supabase-u.';
   }
@@ -64,6 +70,8 @@ export async function POST(request) {
       case 'slava': return await postaviSlavu(supabase, ja, dozvole, tijelo);
       case 'korekcija': return await postaviKorekciju(supabase, dozvole, tijelo);
       case 'podaci': return await postaviPodatke(supabase, dozvole, tijelo);
+      case 'jmbg': return await postaviJmbg(supabase, dozvole, tijelo);
+      case 'jmbg_pregled': return await pregledJmbg(supabase, dozvole);
       default: return greska('Nepoznata akcija.');
     }
   } catch (e) {
@@ -255,6 +263,34 @@ async function postaviPodatke(supabase, dozvole, t) {
   }).eq('id', korisnikId);
   if (error) throw error;
   return NextResponse.json({ success: true });
+}
+
+async function postaviJmbg(supabase, dozvole, t) {
+  if (!dozvole.includes('admin')) return greska('JMBG može upisati samo administrator.', 403);
+  const korisnikId = String(t.korisnikId || '');
+  if (!korisnikId) return greska('Izaberi korisnika.');
+  const jmbg = String(t.jmbg || '').replace(/\s+/g, '');
+
+  if (!jmbg) {
+    const { error } = await supabase.from('zaposleni_jmbg').delete().eq('korisnik_id', korisnikId);
+    if (error) throw error;
+    return NextResponse.json({ success: true, maskiran: '' });
+  }
+  if (!/^\d{13}$/.test(jmbg)) return greska('JMBG mora imati tačno 13 cifara.');
+  if (!jeIspravanJmbg(jmbg)) return greska('JMBG nije ispravan (kontrolna cifra se ne slaže). Provjeri da li je dobro prekucan.');
+
+  const { error } = await supabase.from('zaposleni_jmbg')
+    .upsert({ korisnik_id: korisnikId, jmbg, azurirano_at: new Date().toISOString() }, { onConflict: 'korisnik_id' });
+  if (error) throw error;
+  return NextResponse.json({ success: true, maskiran: maskirajJmbg(jmbg) });
+}
+
+// Samo maskirano (zadnje 4 cifre), da se pun JMBG nikad ne šalje u browser.
+async function pregledJmbg(supabase, dozvole) {
+  if (!dozvole.includes('admin')) return greska('Nemaš dozvolu.', 403);
+  const { data, error } = await supabase.from('zaposleni_jmbg').select('korisnik_id, jmbg');
+  if (error) throw error;
+  return NextResponse.json({ success: true, jmbg: Object.fromEntries((data || []).map((r) => [r.korisnik_id, maskirajJmbg(r.jmbg)])) });
 }
 
 // GET /api/odsustvo?rjesenje=ID → PDF rješenja

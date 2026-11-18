@@ -10,7 +10,7 @@ export const POCETNA_GODINA = 2026; // najduži raspon jednog zahtjeva (kalendar
 
 export const TIPOVI = {
   godisnji: 'Godišnji odmor',
-  neplaceno: 'Neplaćeno odsustvo',
+  neplaceno: 'Plaćeno odsustvo', // interni ključ ostaje 'neplaceno' zbog postojećih podataka
 };
 
 export const STATUSI = {
