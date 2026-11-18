@@ -60,8 +60,12 @@ export async function posaljiEmail({ prima, naslov, sadrzaj, prilozi = [] }) {
 
   const t = dajTransporter();
   if (!t) {
-    console.warn('Email nije poslat: GMAIL_USER / GMAIL_APP_PASSWORD nisu podešeni.');
-    return { ok: false, greska: 'Slanje emailova nije podešeno (GMAIL_USER / GMAIL_APP_PASSWORD).' };
+    const fali = ['GMAIL_USER', 'GMAIL_APP_PASSWORD'].filter((k) => !process.env[k]);
+    console.warn(`Email nije poslat: server ne vidi ${fali.join(' i ')}.`);
+    return {
+      ok: false,
+      greska: `Server ne vidi ${fali.join(' i ')}. Provjeri .env.local (ili Vercel → Environment Variables) i restartuj server.`,
+    };
   }
 
   // Svakom primaocu posebno, da ne vide adrese jedni drugih.

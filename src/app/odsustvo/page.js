@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabase';
 import { ucitajMojeDozvole } from '@/lib/dozvole';
 import {
   TIPOVI, STATUSI, SLAVE, NAZIVI_MJESECI, danasUCrnojGori, dodajDane, danUSedmici, vrstaDana,
-  radniDani, stanjeKorisnika, provjeriKvotu, formatirajDatum, formatirajSlavu, seKlapaju,
+  radniDani, stanjeKorisnika, provjeriKvotu, formatirajDatum, formatirajSlavu, seKlapaju, radnihDanaTekst,
 } from '@/lib/odsustvo';
 
 const imeIz = (email) => (email || '').split('@')[0];
@@ -239,7 +239,7 @@ function MojiDani({ ja, praznici, odsustva, profili, korekcije, danas, godina, a
     setSlanje(true);
     const ok = await akcija(
       { akcija: 'zahtjev', tip, datumOd: odabir.od, datumDo: kraj, napomena },
-      `Zahtjev za ${dani.length} radnih dana je poslat na odobravanje.`
+      `Zahtjev (${radnihDanaTekst(dani.length)}) je poslat na odobravanje.`
     );
     setSlanje(false);
     if (ok) { setOdabir({ od: null, do: null }); setNapomena(''); }
@@ -274,7 +274,7 @@ function MojiDani({ ja, praznici, odsustva, profili, korekcije, danas, godina, a
                 <p className="font-semibold text-slate-900">
                   {formatirajDatum(odabir.od)}{kraj !== odabir.od && <> – {formatirajDatum(kraj)}</>}
                 </p>
-                <p className="text-slate-700 mt-0.5"><strong>{dani.length}</strong> radnih dana (vikendi, praznici i slava se ne računaju)</p>
+                <p className="text-slate-700 mt-0.5"><strong>{radnihDanaTekst(dani.length)}</strong> (vikendi, praznici i slava se ne računaju)</p>
               </div>
               <div>
                 <label htmlFor="tip" className="block text-xs font-bold text-slate-600 mb-1">Vrsta odsustva</label>
@@ -612,7 +612,7 @@ function Odobravanje({ ja, praznici, odsustva, profili, korekcije, danas, godina
               <div>
                 <h3 className="text-base font-bold text-slate-900">{z.korisnik_ime}</h3>
                 <p className="text-sm text-slate-800 mt-0.5">
-                  {TIPOVI[z.tip]}: <strong><Period o={z} /></strong>, {z.radnih_dana} radnih dana
+                  {TIPOVI[z.tip]}: <strong><Period o={z} /></strong>, {radnihDanaTekst(z.radnih_dana)}
                 </p>
                 {z.napomena && <p className="text-sm text-slate-600 mt-1">Napomena: {z.napomena}</p>}
                 <p className="text-xs text-slate-600 mt-1">Podnijeto {formatirajDatum(z.created_at.slice(0, 10))}</p>

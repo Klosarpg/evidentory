@@ -74,6 +74,15 @@ export function formatirajDatum(s) {
   return `${Number(d)}. ${Number(m)}. ${g}.`;
 }
 
+// 1 radni dan, 2–4 radna dana, 5+ radnih dana
+export function radnihDanaTekst(n) {
+  const j = n % 10;
+  const d = n % 100;
+  if (j === 1 && d !== 11) return `${n} radni dan`;
+  if (j >= 2 && j <= 4 && (d < 12 || d > 14)) return `${n} radna dana`;
+  return `${n} radnih dana`;
+}
+
 export function formatirajSlavu(mmdd) {
   if (!mmdd) return '';
   const [m, d] = mmdd.split('-').map(Number);

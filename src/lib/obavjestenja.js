@@ -45,7 +45,9 @@ const upozorenje = (rezultat, kome) => (rezultat.ok ? [] : [`${kome}: ${rezultat
 // Novi zahtjev → svi odobravači.
 export async function obavijestiNoviZahtjev(supabase, zahtjev, adresa) {
   const prima = await emailoviSaDozvolom(supabase, 'odsustvo_odobravanje', zahtjev.korisnik_id);
-  if (prima.length === 0) return ['Nijedan odobravač nema upisan email, pa obavještenje nije poslato.'];
+  if (prima.length === 0) {
+    return ['Nema drugog odobravača sa upisanim emailom (podnosilac zahtjeva ne dobija obavještenje o sopstvenom zahtjevu), pa obavještenje nije poslato.'];
+  }
   const r = await posaljiEmail({
     prima,
     naslov: `Novi zahtjev za slobodne dane: ${zahtjev.korisnik_ime}`,

@@ -53,11 +53,11 @@ export function napraviRjesenje({ zahtjev, profil, broj, datum, redni }) {
   doc.addFileToVFS('LiberationSans-Bold.ttf', LIBERATION_BOLD);
   doc.addFont('LiberationSans-Bold.ttf', 'Liberation', 'bold');
 
-  const lijevo = 25;
-  const sirina = 160;
+  const lijevo = 20;
+  const sirina = 170;
   const desno = lijevo + sirina;
-  const visinaReda = 5.4;
-  let y = 28;
+  const visinaReda = 5.0;
+  let y = 20;
 
   const novaStranaAkoTreba = (potrebno) => {
     if (y + potrebno > 280) {
@@ -88,36 +88,36 @@ export function napraviRjesenje({ zahtjev, profil, broj, datum, redni }) {
   // Zaglavlje
   pasus(FIRMA.naziv, { align: 'left', razmak: 0 });
   pasus(`BROJ ${broj}`, { align: 'left', razmak: 0 });
-  pasus(`${FIRMA.mjesto.toUpperCase()}, ${datumSaTackama(datum)}. godine`, { align: 'left', razmak: 8 });
+  pasus(`${FIRMA.mjesto.toUpperCase()}, ${datumSaTackama(datum)}. godine`, { align: 'left', razmak: 6 });
 
-  pasus(`Na osnovu Zakona o radu ${FIRMA.zakonORadu} direktor društva ${FIRMA.nazivUTekstu} donosi`, { razmak: 4 });
+  pasus(`Na osnovu Zakona o radu ${FIRMA.zakonORadu} direktor društva ${FIRMA.nazivUTekstu} donosi`, { razmak: 3 });
 
   pasus('R J E Š E NJ E', { align: 'center', bold: true, razmak: 0 });
-  pasus('O KORIŠĆENJU GODIŠNJEG ODMORA', { align: 'center', bold: true, razmak: 7 });
+  pasus('O KORIŠĆENJU GODIŠNJEG ODMORA', { align: 'center', bold: true, razmak: 5 });
 
   pasus(
     `1. ${ime} JMBG ____________________, raspoređen${zenski ? 'a' : ''} na radno mjesto ${radnoMjesto}, ` +
     `ima pravo na godišnji odmor za ${godina}. godinu u ukupnom trajanju od ${radnihDana(GODISNJA_KVOTA)}.`,
-    { razmak: 5 }
+    { razmak: 4 }
   );
   pasus(
     `2. Zaposlen${zenski ? 'a' : 'i'} će ${redniDio(redni)} dio godišnjeg odmora u ukupnom trajanju od ` +
     `${radnihDana(zahtjev.radnih_dana)} koristiti ${periodRijecima(zahtjev.datum_od, zahtjev.datum_do)}.`,
-    { razmak: 5 }
+    { razmak: 4 }
   );
   pasus(
     'O eventualnom prekidu korišćenja godišnjeg odmora i razlozima zbog kojih je to uslijedilo, ' +
     'zaposleni je dužan da obavijesti Poslodavca.',
-    { razmak: 7 }
+    { razmak: 5 }
   );
 
-  pasus('Obrazloženje', { align: 'center', razmak: 4 });
+  pasus('Obrazloženje', { align: 'center', razmak: 3 });
   pasus(
     `Zaposlen${zenski ? 'a' : 'i'} ${ime}, ${zenski ? 'koja' : 'koji'} je u radnom odnosu na ${odnos} vrijeme u ` +
     `${FIRMA.nazivUTekstu} ${FIRMA.mjesto}, raspoređen${zenski ? 'a' : ''} na radnom mjestu ${radnoMjesto}, ` +
     `koristi odmor za ${godina}. godinu koji ${zenski ? 'joj' : 'mu'} obezbjeđuje Poslodavac, u periodu kako je ` +
     'navedeno u dispozitivu ovog Rješenja.',
-    { razmak: 4 }
+    { razmak: 3 }
   );
   pasus(
     'U zavisnosti od potreba procesa rada Poslodavac je na osnovu Plana korišćenja godišnjih odmora, odlučio o ' +
@@ -126,7 +126,7 @@ export function napraviRjesenje({ zahtjev, profil, broj, datum, redni }) {
     'članu 80 stav 2 Zakona o radu. Dužina godišnjeg odmora utvrđena je u skladu sa članom 81 stav 1 Zakona o radu, ' +
     'kojim je propisano da zaposleni ima pravo na godišnji odmor u trajanju od najmanje 20 radnih dana u svakoj ' +
     'kalendarskoj godini.',
-    { razmak: 5 }
+    { razmak: 4 }
   );
   pasus(
     'PRAVNA POUKA: Zaposleni koji smatra da mu je povrijeđeno pravo iz rada i po osnovu rada, prije pokretanja ' +
@@ -138,25 +138,28 @@ export function napraviRjesenje({ zahtjev, profil, broj, datum, redni }) {
     'Ako se radni spor ne riješi pred organima iz stava 1 ove pravne pouke zaposleni može da pokrene spor pred ' +
     'nadležnim sudom. Postupak pred sudom može da se pokrene u roku od 15 dana od dana dostavljanja odluke kojom je ' +
     'obustavljen postupak mirnog rješavanja spora.',
-    { razmak: 7 }
+    { razmak: 6 }
   );
 
-  // Dostavljeno + potpis
-  novaStranaAkoTreba(40);
+  // Dostavljeno (lijevo) i potpis (desno), u istoj visini
+  novaStranaAkoTreba(30);
   const yDostavljeno = y;
   pasus('Dostavljeno:', { align: 'left', razmak: 0 });
   pasus('•  Zaposlenom', { align: 'left', razmak: 0, uvlaka: 6 });
   pasus('•  U dosije', { align: 'left', razmak: 0, uvlaka: 6 });
 
+  const sirinaPotpisa = 70;
+  const sredinaPotpisa = desno - sirinaPotpisa / 2;
+  const yFirma = yDostavljeno + 4;
+  const yLinija = yFirma + 16;
   doc.setFont('Liberation', 'normal');
   doc.setFontSize(11);
-  const yPotpis = yDostavljeno + 14;
-  doc.text(FIRMA.nazivUTekstu, desno, yPotpis, { align: 'right' });
+  doc.text(FIRMA.nazivUTekstu, sredinaPotpisa, yFirma, { align: 'center' });
   doc.setLineWidth(0.3);
-  doc.line(desno - 65, yPotpis + 14, desno, yPotpis + 14);
+  doc.line(desno - sirinaPotpisa, yLinija, desno, yLinija);
   doc.setFontSize(9);
-  doc.text('M.P.', desno - 80, yPotpis + 14);
-  doc.text('potpis', desno - 32.5, yPotpis + 18.5, { align: 'center' });
+  doc.text('M.P.', desno - sirinaPotpisa - 14, yLinija);
+  doc.text('potpis', sredinaPotpisa, yLinija + 4.5, { align: 'center' });
 
   return Buffer.from(doc.output('arraybuffer'));
 }
