@@ -57,7 +57,10 @@ export async function POST(request) {
     if (jeZauzeto(error)) return greska(`Korisničko ime "${ime}" je već zauzeto.`);
     if ((error.message || '').toLowerCase().includes('password')) return greska('Lozinka nije prihvaćena. Probaj dužu lozinku.');
     console.error('Kreiranje korisnika nije uspjelo:', error.message);
-    return greska('Korisnik nije kreiran. Pokušaj ponovo.', 500);
+    const baza = /database error/i.test(error.message)
+      ? ' Najčešće je uzrok trigger u bazi koji pravi profil (provjeri SQL "novi-korisnici.sql" i kolone tabele profili).'
+      : '';
+    return greska(`Korisnik nije kreiran: ${error.message}.${baza}`, 500);
   }
 
   const red = { id: data.user.id, email, uloga };
