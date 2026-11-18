@@ -24,6 +24,14 @@ const MODULI = [
     vidljivo: (d) => d.some((x) => x.startsWith('odsustvo_')),
     ikona: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z',
   },
+  {
+    kljuc: 'admin',
+    naslov: 'Administracija',
+    opis: 'Korisnici, uloge i dozvole, komitenti, istorija prometa i praznici.',
+    adresa: '/admin',
+    vidljivo: (d) => d.includes('admin'),
+    ikona: 'M10.3 4.3c.4-1.8 2.9-1.8 3.4 0a1.7 1.7 0 002.6 1.1c1.5-.9 3.3.8 2.4 2.4a1.7 1.7 0 001 2.5c1.8.4 1.8 2.9 0 3.4a1.7 1.7 0 00-1 2.6c.9 1.5-.9 3.3-2.4 2.4a1.7 1.7 0 00-2.6 1c-.4 1.8-2.9 1.8-3.4 0a1.7 1.7 0 00-2.6-1c-1.5.9-3.3-.9-2.4-2.4a1.7 1.7 0 00-1-2.6c-1.8-.4-1.8-2.9 0-3.4a1.7 1.7 0 001-2.6c-.9-1.5.9-3.3 2.4-2.4 1 .6 2.3.1 2.6-1.1zM15 12a3 3 0 11-6 0 3 3 0 016 0z',
+  },
 ];
 
 export default function Pocetna() {
@@ -69,7 +77,7 @@ export default function Pocetna() {
             Tvoja uloga trenutno nema pristup nijednom modulu. Javi se administratoru.
           </p>
         ) : (
-          <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 gap-5">
+          <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
             {dostupni.map((m) => {
               const sadrzaj = (
                 <>

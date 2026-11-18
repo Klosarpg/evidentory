@@ -19,6 +19,8 @@ import { jeIspravanJmbg, maskirajJmbg } from '@/lib/slikeFirme';
 //   podaci     { korisnikId, imePrezime, radnoMjesto, pol, radniOdnos }  dozvola: admin (podaci za rješenje)
 //   jmbg       { korisnikId, jmbg }   dozvola: admin; prazan jmbg briše upis
 //   jmbg_pregled                      dozvola: admin; vraća samo maskirane JMBG-ove
+//   praznik    { datum, naziv }       dozvola: admin; dodaje ili mijenja praznik
+//   praznik_obrisi { datum }          dozvola: admin
 // GET /api/odsustvo?rjesenje=ID  → PDF rješenja (vlasnik, odobravač, pregled svih ili prima dokument)
 //
 // Odgovor može imati "upozorenja": akcija je uspjela, ali npr. email nije poslat.
@@ -88,6 +90,8 @@ export async function POST(request) {
       case 'podaci': return await postaviPodatke(supabase, dozvole, tijelo);
       case 'jmbg': return await postaviJmbg(supabase, dozvole, tijelo);
       case 'jmbg_pregled': return await pregledJmbg(supabase, dozvole);
+      case 'praznik': return await sacuvajPraznik(supabase, dozvole, tijelo);
+      case 'praznik_obrisi': return await obrisiPraznik(supabase, dozvole, tijelo);
       default: return greska('Nepoznata akcija.');
     }
   } catch (e) {
@@ -123,11 +127,11 @@ async function noviZahtjev(supabase, ja, dozvole, t, adresa) {
     return greska(`Već imaš zahtjev za period ${formatirajDatum(preklapanje.datum_od)} – ${formatirajDatum(preklapanje.datum_do)}.`);
   }
 
+  // Zahtjev preko broja slobodnih dana je dozvoljen; korisnik i odobravači dobijaju napomenu.
+  let manjak = 0;
   if (tip === 'godisnji') {
-    const kvota = provjeriKvotu({ postojeca: k.odsustva, novi, korekcije: k.korekcije, praznici: k.praznici, slava: k.slava, danas });
-    if (!kvota.ok) {
-      return greska(`Nemaš dovoljno slobodnih dana: zahtjev traži ${dani.length} radnih dana, fali ti ${kvota.fali}. Računaju se i zahtjevi na čekanju.`);
-    }
+    const kvota = provjeriKvotu({ postojeca: k.odsustva, novi, korekcije: k.korekcije, praznici: k.praznici, slava: k.slava });
+    manjak = kvota.fali;
   }
 
   const { data, error } = await supabase.from('odsustva').insert({
@@ -141,7 +145,10 @@ async function noviZahtjev(supabase, ja, dozvole, t, adresa) {
   }).select().single();
   if (error) throw error;
 
-  const upozorenja = uPozadini(await obavijestiNoviZahtjev(supabase, data, adresa), 'Novi zahtjev');
+  const upozorenja = uPozadini(await obavijestiNoviZahtjev(supabase, data, adresa, { manjak }), 'Novi zahtjev');
+  if (manjak > 0) {
+    upozorenja.unshift(`Tražiš ${dani.length} radnih dana, a slobodno ti je ${dani.length - manjak}. Odobravač će vidjeti da fali ${manjak} i odlučiće da li odobrava.`);
+  }
   return NextResponse.json({ success: true, zahtjev: data, upozorenja });
 }
 
@@ -185,14 +192,8 @@ async function obradi(supabase, ja, dozvole, t, adresa) {
     return greska('Ne možeš odobriti sopstveni zahtjev. Neka ga obradi drugi odobravač.', 403);
   }
 
+  // Odobravač smije odobriti i zahtjev preko broja slobodnih dana (upozorenje vidi na ekranu prije odluke).
   const odobri = t.akcija === 'odobri';
-  if (odobri && z.tip === 'godisnji') {
-    // Ponovna provjera: od podnošenja su se mogli promijeniti praznici ili drugi zahtjevi.
-    const k = await ucitajKontekst(supabase, z.korisnik_id);
-    const ostali = k.odsustva.filter((o) => o.id !== z.id);
-    const kvota = provjeriKvotu({ postojeca: ostali, novi: z, korekcije: k.korekcije, praznici: k.praznici, slava: k.slava, danas: danasUCrnojGori() });
-    if (!kvota.ok) return greska(`Korisniku fali ${kvota.fali} slobodnih dana za ovaj zahtjev. Odbij ga ili traži izmjenu.`);
-  }
 
   const { data, error } = await supabase.from('odsustva').update({
     status: odobri ? 'odobreno' : 'odbijeno',
@@ -307,6 +308,26 @@ async function pregledJmbg(supabase, dozvole) {
   const { data, error } = await supabase.from('zaposleni_jmbg').select('korisnik_id, jmbg');
   if (error) throw error;
   return NextResponse.json({ success: true, jmbg: Object.fromEntries((data || []).map((r) => [r.korisnik_id, maskirajJmbg(r.jmbg)])) });
+}
+
+async function sacuvajPraznik(supabase, dozvole, t) {
+  if (!dozvole.includes('admin')) return greska('Praznike mijenja samo administrator.', 403);
+  const datum = String(t.datum || '');
+  const naziv = String(t.naziv || '').trim().slice(0, 80);
+  if (!jeIspravanDatum(datum)) return greska('Izaberi ispravan datum.');
+  if (!naziv) return greska('Upiši naziv praznika.');
+  const { error } = await supabase.from('praznici').upsert({ datum, naziv }, { onConflict: 'datum' });
+  if (error) throw error;
+  return NextResponse.json({ success: true });
+}
+
+async function obrisiPraznik(supabase, dozvole, t) {
+  if (!dozvole.includes('admin')) return greska('Praznike mijenja samo administrator.', 403);
+  const datum = String(t.datum || '');
+  if (!jeIspravanDatum(datum)) return greska('Datum nije ispravan.');
+  const { error } = await supabase.from('praznici').delete().eq('datum', datum);
+  if (error) throw error;
+  return NextResponse.json({ success: true });
 }
 
 // GET /api/odsustvo?rjesenje=ID → PDF rješenja

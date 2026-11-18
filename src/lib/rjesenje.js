@@ -47,7 +47,8 @@ export function napraviRjesenje({ zahtjev, profil, broj, datum, redni, jmbg = nu
   const ime = profil.ime_prezime || zahtjev.korisnik_ime;
   const radnoMjesto = profil.radno_mjesto || '________________________________';
   const odnos = profil.radni_odnos === 'određeno' ? 'određeno' : 'neodređeno';
-  const godina = zahtjev.datum_od.slice(0, 4);
+  // Rješenje se piše za tekuću godinu: godinu datuma rješenja.
+  const godina = datum.slice(0, 4);
 
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   doc.addFileToVFS('LiberationSans-Regular.ttf', LIBERATION_REGULAR);

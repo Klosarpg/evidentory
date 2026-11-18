@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server';
 import { adminKlijent, dozvoleUloge } from '@/lib/serverAdmin';
-import { danasUCrnojGori, dodajDane, stanjeKorisnika } from '@/lib/odsustvo';
+import { danasUCrnojGori, dodajDane, stanjeKorisnika, periodZaDatum } from '@/lib/odsustvo';
 import { adresaAplikacije, podsjetnikSlava, podsjetnikPrenos } from '@/lib/obavjestenja';
 
 // Dnevni podsjetnici (Vercel Cron, vidi vercel.json):
 //  - 5 dana prije slave: podsjetnik korisniku
-//  - 30. decembra (6 mjeseci prije isteka): ko ima neiskorišćene dane iz ove godine (ističu 30. juna sljedeće)
+//  - 30. decembra (6 mjeseci prije isteka perioda 30. juna): ko ima neiskorišćene dane
 // Ručni test: /api/cron/podsjetnici?danas=2026-12-30 (sa Authorization: Bearer CRON_SECRET)
 
 export async function GET(request) {
@@ -19,7 +19,6 @@ export async function GET(request) {
 
   const zadato = new URL(request.url).searchParams.get('danas');
   const danas = /^\d{4}-\d{2}-\d{2}$/.test(zadato || '') ? zadato : danasUCrnojGori();
-  const godina = Number(danas.slice(0, 4));
   const adresa = adresaAplikacije(null);
   const supabase = adminKlijent();
   const izvjestaj = { danas, slava: 0, prenos: 0, upozorenja: [] };
@@ -37,7 +36,7 @@ export async function GET(request) {
       izvjestaj.slava++;
     }
 
-    // 2) 30. decembar: neiskorišćeni dani ove godine prelaze u sljedeću i važe do 30. juna
+    // 2) 30. decembar: neiskorišćeni dani tekućeg perioda ističu 30. juna
     if (danas.slice(5) === '12-30') {
       const { data: praznici } = await supabase.from('praznici').select('datum, naziv');
       const mapaPraznika = new Map((praznici || []).map((x) => [x.datum, x.naziv]));
@@ -51,9 +50,9 @@ export async function GET(request) {
         const stanje = stanjeKorisnika({
           odsustva: (odsustva || []).filter((o) => o.korisnik_id === p.id),
           korekcije: (korekcije || []).filter((k) => k.korisnik_id === p.id),
-          praznici: mapaPraznika, slava: p.slava_datum, godina: godina + 1, danas,
+          praznici: mapaPraznika, slava: p.slava_datum, period: periodZaDatum(danas),
         });
-        if (stanje.prenosPreostalo > 0) {
+        if (stanje.preostalo > 0) {
           izvjestaj.upozorenja.push(...await podsjetnikPrenos(p, stanje, adresa));
           izvjestaj.prenos++;
         }

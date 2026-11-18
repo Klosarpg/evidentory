@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { provjeriDozvolu, greska } from '@/lib/serverAdmin';
+import { provjeriDozvolu, greska, dozvoleUloge } from '@/lib/serverAdmin';
 
 // Upravljanje korisnicima iz Kontrolnog panela (dozvola "admin"), bez slanja emailova.
 // Korisnik se prijavljuje korisničkim imenom; u Supabase-u nalog ima adresu "ime@evidentory.com".
@@ -74,17 +74,27 @@ export async function POST(request) {
     );
   }
 
-  return NextResponse.json({ success: true });
+  return NextResponse.json({ success: true, id: data.user.id });
 }
 
-// PATCH /api/korisnici  { id, korisnickoIme?, lozinka?, kontaktEmail? }  → mijenja ime, lozinku i/ili email
+// PATCH /api/korisnici  { id, korisnickoIme?, lozinka?, kontaktEmail?, uloga? }  → mijenja nalog
 export async function PATCH(request) {
-  const { supabase, odgovor } = await provjeriDozvolu(request, 'admin');
+  const { supabase, adminId, odgovor } = await provjeriDozvolu(request, 'admin');
   if (odgovor) return odgovor;
 
   const tijelo = await request.json().catch(() => ({}));
   const id = String(tijelo.id || '');
   if (!id) return greska('Izaberi korisnika.');
+
+  let novaUloga = null;
+  if (tijelo.uloga !== undefined) {
+    novaUloga = String(tijelo.uloga);
+    if (!(await postojiUloga(supabase, novaUloga))) return greska(`Uloga "${novaUloga}" ne postoji.`);
+    // Zaštita od zaključavanja: sebi ne možeš dati ulogu bez administracije.
+    if (id === adminId && !(await dozvoleUloge(supabase, novaUloga)).includes('admin')) {
+      return greska('Ne možeš sebi dodijeliti ulogu bez administracije. Neka to uradi drugi administrator.');
+    }
+  }
 
   const izmjene = {};
   let noviEmail = null;
@@ -126,6 +136,7 @@ export async function PATCH(request) {
   const profilIzmjene = {};
   if (izmjene.email) profilIzmjene.email = izmjene.email;
   if (kontakt) profilIzmjene.kontakt_email = kontakt.email;
+  if (novaUloga) profilIzmjene.uloga = novaUloga;
   if (Object.keys(profilIzmjene).length > 0) {
     const { error: profilGreska } = await supabase.from('profili').update(profilIzmjene).eq('id', id);
     if (profilGreska) {

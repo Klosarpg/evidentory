@@ -7,6 +7,7 @@ import { ucitajMojeDozvole } from '@/lib/dozvole';
 import {
   TIPOVI, STATUSI, SLAVE, NAZIVI_MJESECI, danasUCrnojGori, dodajDane, danUSedmici, vrstaDana,
   radniDani, stanjeKorisnika, provjeriKvotu, formatirajDatum, formatirajSlavu, seKlapaju, radnihDanaTekst,
+  periodZaDatum, nazivPerioda,
 } from '@/lib/odsustvo';
 
 const imeIz = (email) => (email || '').split('@')[0];
@@ -93,7 +94,7 @@ export default function Odsustvo() {
   const [poruka, setPoruka] = useState(null); // { tip: 'uspjeh' | 'greska', tekst, upozorenja? }
 
   const danas = danasUCrnojGori();
-  const godina = Number(danas.slice(0, 4));
+  const godina = periodZaDatum(danas); // tekući period godišnjeg (1. 7. – 30. 6.), označen godinom početka
 
   const ucitaj = useCallback(async () => {
     const mojeDozvole = await ucitajMojeDozvole(supabase);
@@ -255,7 +256,7 @@ function MojiDani({ ja, praznici, odsustva, profili, korekcije, danas, godina, a
   const mojeKorekcije = korekcije.filter((k) => k.korisnik_id === ja.user.id);
   const aktivna = moja.filter((o) => ['na_cekanju', 'odobreno'].includes(o.status));
 
-  const stanje = stanjeKorisnika({ odsustva: aktivna, korekcije: mojeKorekcije, praznici, slava, godina, danas });
+  const stanje = stanjeKorisnika({ odsustva: aktivna, korekcije: mojeKorekcije, praznici, slava, period: godina });
 
   const [mjesec, setMjesec] = useState(danas.slice(0, 7));
   const [odabir, setOdabir] = useState({ od: null, do: null });
@@ -269,7 +270,7 @@ function MojiDani({ ja, praznici, odsustva, profili, korekcije, danas, godina, a
   const poslije = odabir.od && tip === 'godisnji' && dani.length > 0
     ? stanjeKorisnika({
         odsustva: [...aktivna, { tip, status: 'na_cekanju', datum_od: odabir.od, datum_do: kraj }],
-        korekcije: mojeKorekcije, praznici, slava, godina, danas,
+        korekcije: mojeKorekcije, praznici, slava, period: godina,
       }).dostupno
     : null;
   const kvota = odabir.od && tip === 'godisnji'
@@ -341,14 +342,18 @@ function MojiDani({ ja, praznici, odsustva, profili, korekcije, danas, godina, a
 
               {preklapanje && <p role="alert" className="text-sm text-red-700">Već imaš zahtjev koji se preklapa sa ovim periodom.</p>}
               {!preklapanje && dani.length === 0 && <p role="alert" className="text-sm text-red-700">U ovom periodu nema radnih dana.</p>}
-              {!preklapanje && dani.length > 0 && !kvota.ok && <p role="alert" className="text-sm text-red-700">Nemaš dovoljno dana: fali ti {kvota.fali}.</p>}
-              {!preklapanje && kvota.ok && poslije !== null && kraj.slice(0, 4) === String(godina) && (
+              {!preklapanje && dani.length > 0 && !kvota.ok && (
+                <p className="text-sm text-amber-950 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  Tražiš {radnihDanaTekst(dani.length)}, a slobodno ti je {dani.length - kvota.fali}. Zahtjev možeš poslati; odobravač će vidjeti da fali {kvota.fali} i odlučiti.
+                </p>
+              )}
+              {!preklapanje && kvota.ok && poslije !== null && periodZaDatum(kraj) === godina && (
                 <p className="text-sm text-slate-700">Poslije ovog zahtjeva ostaje ti <strong className="tabular-nums">{poslije}</strong> {poslije === 1 ? 'dan' : 'dana'}.</p>
               )}
 
               <div className="flex gap-2">
                 <button type="button" onClick={() => setOdabir({ od: null, do: null })} className={`px-4 py-2 rounded-lg text-sm font-semibold bg-slate-100 hover:bg-slate-200 text-slate-800 ${FOKUS}`}>Poništi</button>
-                <button type="submit" disabled={slanje || dani.length === 0 || !!preklapanje || !kvota.ok} className={`flex-1 px-4 py-2 rounded-lg text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white disabled:bg-slate-300 disabled:text-slate-600 disabled:cursor-not-allowed ${FOKUS}`}>
+                <button type="submit" disabled={slanje || dani.length === 0 || !!preklapanje} className={`flex-1 px-4 py-2 rounded-lg text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white disabled:bg-slate-300 disabled:text-slate-600 disabled:cursor-not-allowed ${FOKUS}`}>
                   {slanje ? 'Slanje…' : 'Pošalji zahtjev'}
                 </button>
               </div>
@@ -368,14 +373,11 @@ function MojiDani({ ja, praznici, odsustva, profili, korekcije, danas, godina, a
 }
 
 function StanjePregled({ stanje, godina }) {
-  const prenos = stanje.prenosIsteklo > 0
-    ? { vrijednost: 0, opis: `${stanje.prenosIsteklo} isteklo ${formatirajDatum(stanje.rokPrenosa)}` }
-    : { vrijednost: stanje.prenosPreostalo, opis: stanje.prenosPreostalo > 0 ? `ističe ${formatirajDatum(stanje.rokPrenosa)}` : 'nema prenesenih' };
   const stavke = [
-    { naziv: `Godišnji ${godina}.`, vrijednost: stanje.kvotaPreostalo, opis: `od ${stanje.kvota} dana` },
-    { naziv: `Iz ${godina - 1}. godine`, vrijednost: prenos.vrijednost, opis: prenos.opis, hitno: stanje.prenosPreostalo > 0 },
-    { naziv: 'Iskorišćeno', vrijednost: stanje.iskoristeno, opis: `u ${godina}. godini` },
+    { naziv: 'Pripada', vrijednost: stanje.kvota, opis: `za period ${nazivPerioda(godina)}` },
+    { naziv: 'Iskorišćeno', vrijednost: stanje.iskoristeno, opis: stanje.umanjenje ? `od toga ${stanje.umanjenje} umanjenje` : 'odobreni zahtjevi' },
     { naziv: 'Na čekanju', vrijednost: stanje.naCekanju, opis: stanje.naCekanju ? 'čeka odobrenje' : 'nema zahtjeva' },
+    { naziv: 'Ističe', vrijednost: formatirajDatum(stanje.istice), opis: 'neiskorišćeni dani propadaju', datum: true },
   ];
 
   return (
@@ -395,15 +397,15 @@ function StanjePregled({ stanje, godina }) {
           {stavke.map((s, i) => (
             <div key={s.naziv} className={`p-5 ${i > 0 ? 'lg:border-l' : ''} ${i % 2 === 1 ? 'border-l lg:border-l' : ''} ${i >= 2 ? 'border-t lg:border-t-0' : ''} border-slate-200`}>
               <dt className="text-sm text-slate-700">{s.naziv}</dt>
-              <dd className="mt-1 text-2xl font-semibold tabular-nums text-slate-900">{s.vrijednost}</dd>
-              <dd className={`text-xs mt-0.5 ${s.hitno ? 'text-amber-800 font-semibold' : 'text-slate-600'}`}>{s.opis}</dd>
+              <dd className={`mt-1 font-semibold tabular-nums text-slate-900 ${s.datum ? 'text-xl' : 'text-2xl'}`}>{s.vrijednost}</dd>
+              <dd className="text-xs mt-0.5 text-slate-600">{s.opis}</dd>
             </div>
           ))}
         </dl>
       </div>
       {stanje.prekoracenje > 0 && (
         <p className="px-6 py-3 border-t border-slate-200 text-sm text-red-800 bg-red-50 rounded-b-2xl">
-          Upisano je {stanje.prekoracenje} dana više nego što pripada. Javi se administratoru da provjeri korekciju.
+          Odobreno je {stanje.prekoracenje} {stanje.prekoracenje === 1 ? 'dan' : 'dana'} više nego što pripada za ovaj period.
         </p>
       )}
     </section>
@@ -687,8 +689,16 @@ function Odobravanje({ ja, praznici, odsustva, profili, korekcije, danas, godina
         const njegova = odsustva.filter((o) => o.korisnik_id === z.korisnik_id && ['na_cekanju', 'odobreno'].includes(o.status));
         const stanje = stanjeKorisnika({
           odsustva: njegova, korekcije: korekcije.filter((k) => k.korisnik_id === z.korisnik_id),
-          praznici, slava: profil.slava_datum, godina, danas,
+          praznici, slava: profil.slava_datum, period: godina,
         });
+        const kvotaZahtjeva = z.tip === 'godisnji'
+          ? provjeriKvotu({
+              postojeca: njegova.filter((o) => o.id !== z.id),
+              novi: z,
+              korekcije: korekcije.filter((k) => k.korisnik_id === z.korisnik_id),
+              praznici, slava: profil.slava_datum,
+            })
+          : { ok: true, fali: 0 };
         const istovremeno = odsustva.filter((o) => o.korisnik_id !== z.korisnik_id && ['na_cekanju', 'odobreno'].includes(o.status) && seKlapaju(o, z));
         const svoj = z.korisnik_id === ja.user.id && !ja.dozvole.includes('admin');
 
@@ -714,6 +724,11 @@ function Odobravanje({ ja, praznici, odsustva, profili, korekcije, danas, godina
               <p className="mt-3 text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
                 Za rješenje nedostaje {!profil.ime_prezime ? 'ime i prezime' : 'radno mjesto'}.{' '}
                 {jeAdmin ? 'Upiši ga u "Svi korisnici" → Detalji prije odobravanja.' : 'Javi administratoru da ga upiše.'}
+              </p>
+            )}
+            {!kvotaZahtjeva.ok && (
+              <p className="mt-3 text-sm text-amber-950 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                Traži {radnihDanaTekst(z.radnih_dana)}, a slobodno ima {z.radnih_dana - kvotaZahtjeva.fali}: fali {kvotaZahtjeva.fali}. Možeš ga svejedno odobriti.
               </p>
             )}
             {istovremeno.length > 0 && (
@@ -754,15 +769,6 @@ function SviKorisnici({ ja, praznici, odsustva, profili, korekcije, danas, godin
   const [pretraga, setPretraga] = useState('');
   const jeAdmin = ja.dozvole.includes('admin');
   const jeOdobravac = ja.dozvole.includes('odsustvo_odobravanje');
-  const [jmbgovi, setJmbgovi] = useState({});
-
-  // Admin vidi samo maskirane JMBG-ove (zadnje 4 cifre).
-  const ucitajJmbgove = useCallback(async () => {
-    if (!jeAdmin) return;
-    const r = await pozoviApi({ akcija: 'jmbg_pregled' });
-    if (r.ok) setJmbgovi(r.podaci.jmbg || {});
-  }, [jeAdmin]);
-  useEffect(() => { ucitajJmbgove(); }, [ucitajJmbgove]);
 
   const redovi = useMemo(() => profili
     .map((p) => {
@@ -770,7 +776,7 @@ function SviKorisnici({ ja, praznici, odsustva, profili, korekcije, danas, godin
       const stanje = stanjeKorisnika({
         odsustva: njegova.filter((o) => ['na_cekanju', 'odobreno'].includes(o.status)),
         korekcije: korekcije.filter((k) => k.korisnik_id === p.id),
-        praznici, slava: p.slava_datum, godina, danas,
+        praznici, slava: p.slava_datum, period: godina,
       });
       const sada = njegova.find((o) => o.status === 'odobreno' && o.datum_od <= danas && danas <= o.datum_do);
       return { p, ime: imeIz(p.email), njegova, stanje, sada };
@@ -780,7 +786,7 @@ function SviKorisnici({ ja, praznici, odsustva, profili, korekcije, danas, godin
   return (
     <div className="bg-white border border-slate-200 rounded-2xl p-5">
       <div className="flex flex-wrap items-end justify-between gap-3 mb-4">
-        <h2 className="text-base font-bold text-slate-900">Slobodni dani svih korisnika, {godina}.</h2>
+        <h2 className="text-base font-bold text-slate-900">Slobodni dani svih korisnika, period {nazivPerioda(godina)}</h2>
         <div>
           <label htmlFor="pretraga-korisnika" className="sr-only">Pretraga korisnika</label>
           <input id="pretraga-korisnika" type="search" placeholder="Pretraži korisnika…" value={pretraga} onChange={(e) => setPretraga(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-500" />
@@ -792,7 +798,6 @@ function SviKorisnici({ ja, praznici, odsustva, profili, korekcije, danas, godin
           <thead className="text-xs text-slate-600 border-b border-slate-200">
             <tr>
               <th className="py-2 pr-4 font-semibold">Korisnik</th>
-              <th className="py-2 pr-4 font-semibold text-right">Iz prošle god.</th>
               <th className="py-2 pr-4 font-semibold text-right">Iskorišćeno</th>
               <th className="py-2 pr-4 font-semibold text-right">Na čekanju</th>
               <th className="py-2 pr-4 font-semibold text-right">Preostalo</th>
@@ -808,7 +813,6 @@ function SviKorisnici({ ja, praznici, odsustva, profili, korekcije, danas, godin
                     {p.ime_prezime && <span className="block text-xs text-slate-600">{p.ime_prezime}</span>}
                     {sada && <span className="ml-2 text-xs font-semibold text-green-900 bg-green-100 px-2 py-0.5 rounded-full">danas odsutan</span>}
                   </td>
-                  <td className="py-2.5 pr-4 text-right tabular-nums">{stanje.prenosPreostalo}</td>
                   <td className="py-2.5 pr-4 text-right tabular-nums">{stanje.iskoristeno}</td>
                   <td className="py-2.5 pr-4 text-right tabular-nums">{stanje.naCekanju}</td>
                   <td className="py-2.5 pr-4 text-right tabular-nums font-bold text-slate-900">{stanje.preostalo}</td>
@@ -820,14 +824,20 @@ function SviKorisnici({ ja, praznici, odsustva, profili, korekcije, danas, godin
                 </tr>
                 {otvoren === p.id && (
                   <tr>
-                    <td colSpan={6} className="bg-slate-50 px-4 py-4">
+                    <td colSpan={5} className="bg-slate-50 px-4 py-4">
                       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_300px] gap-6">
                         <ListaZahtjeva zahtjevi={njegova} akcija={akcija} javiGresku={javiGresku} mojId={ja.user.id} mozeOtkazatiOdobreno={jeOdobravac} prazno="Ovaj korisnik još nema zahtjeva." />
-                        <div className="space-y-5">
-                          {jeAdmin && <PodaciForma profil={p} akcija={akcija} />}
-                          {jeAdmin && <JmbgForma korisnikId={p.id} maskiran={jmbgovi[p.id]} akcija={akcija} osvjezi={ucitajJmbgove} />}
-                          <SlavaPolje profil={p} akcija={akcija} korisnikId={p.id} jeAdmin={jeAdmin} />
-                          {jeAdmin && <KorekcijaForma korisnikId={p.id} godina={godina} postojeca={korekcije.find((k) => k.korisnik_id === p.id && k.godina === godina)} akcija={akcija} />}
+                        <div className="space-y-3 text-sm">
+                          <dl className="space-y-2">
+                            <div><dt className="text-xs text-slate-600">Ime i prezime</dt><dd className="text-slate-900">{p.ime_prezime || '—'}</dd></div>
+                            <div><dt className="text-xs text-slate-600">Radno mjesto</dt><dd className="text-slate-900">{p.radno_mjesto || '—'}</dd></div>
+                            <div><dt className="text-xs text-slate-600">Slava</dt><dd className="text-slate-900">{p.slava_datum ? `${p.slava_naziv || 'Slava'}, ${formatirajSlavu(p.slava_datum)}` : '—'}</dd></div>
+                          </dl>
+                          {jeAdmin && (
+                            <a href={`/admin?sekcija=korisnici&korisnik=${p.id}`} className={`inline-block font-semibold text-blue-700 hover:underline rounded ${FOKUS}`}>
+                              Uredi u Administraciji
+                            </a>
+                          )}
                         </div>
                       </div>
                     </td>
@@ -846,132 +856,3 @@ function FragmentRed({ children }) {
   return <>{children}</>;
 }
 
-function KorekcijaForma({ korisnikId, godina, postojeca, akcija }) {
-  const [dana, setDana] = useState(String(postojeca?.dana ?? 0));
-  const [prenos, setPrenos] = useState(String(postojeca?.prenos ?? 0));
-  const [slanje, setSlanje] = useState(false);
-
-  const posalji = async (e) => {
-    e.preventDefault();
-    setSlanje(true);
-    await akcija({ akcija: 'korekcija', korisnikId, godina, dana: Number(dana), prenos: Number(prenos) }, 'Korekcija je sačuvana.');
-    setSlanje(false);
-  };
-
-  return (
-    <form onSubmit={posalji} className="space-y-2">
-      <p className="text-xs font-bold text-slate-600">Korekcija za {godina}.</p>
-      <div className="grid grid-cols-2 gap-2">
-        <div>
-          <label htmlFor={`kor-dana-${korisnikId}`} className="block text-xs text-slate-700 mb-1">Iskorišćeno van aplikacije</label>
-          <input id={`kor-dana-${korisnikId}`} type="number" min={0} max={365} value={dana} onChange={(e) => setDana(e.target.value)} className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm tabular-nums" />
-        </div>
-        <div>
-          <label htmlFor={`kor-prenos-${korisnikId}`} className="block text-xs text-slate-700 mb-1">Preneseno iz prošle god.</label>
-          <input id={`kor-prenos-${korisnikId}`} type="number" min={0} max={365} value={prenos} onChange={(e) => setPrenos(e.target.value)} className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm tabular-nums" />
-        </div>
-      </div>
-      <button type="submit" disabled={slanje} className={`px-3 py-1.5 rounded-lg text-sm font-bold bg-slate-800 hover:bg-slate-900 text-white disabled:bg-slate-300 ${FOKUS}`}>{slanje ? 'Čuvanje…' : 'Sačuvaj korekciju'}</button>
-    </form>
-  );
-}
-
-function PodaciForma({ profil, akcija }) {
-  const [imePrezime, setImePrezime] = useState(profil.ime_prezime || '');
-  const [radnoMjesto, setRadnoMjesto] = useState(profil.radno_mjesto || '');
-  const [pol, setPol] = useState(profil.pol || '');
-  const [radniOdnos, setRadniOdnos] = useState(profil.radni_odnos || 'neodređeno');
-  const [slanje, setSlanje] = useState(false);
-  const id = profil.id;
-  const polje = 'w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm bg-white';
-
-  const posalji = async (e) => {
-    e.preventDefault();
-    setSlanje(true);
-    await akcija({ akcija: 'podaci', korisnikId: id, imePrezime, radnoMjesto, pol, radniOdnos }, 'Podaci za rješenje su sačuvani.');
-    setSlanje(false);
-  };
-
-  return (
-    <form onSubmit={posalji} className="space-y-2">
-      <p className="text-xs font-bold text-slate-600">Podaci za rješenje</p>
-      <div>
-        <label htmlFor={`ime-${id}`} className="block text-xs text-slate-700 mb-1">Ime i prezime</label>
-        <input id={`ime-${id}`} value={imePrezime} onChange={(e) => setImePrezime(e.target.value)} placeholder="npr. Marko Marković" className={polje} />
-      </div>
-      <div>
-        <label htmlFor={`rm-${id}`} className="block text-xs text-slate-700 mb-1">Radno mjesto</label>
-        <input id={`rm-${id}`} value={radnoMjesto} onChange={(e) => setRadnoMjesto(e.target.value)} className={polje} />
-      </div>
-      <div className="grid grid-cols-2 gap-2">
-        <div>
-          <label htmlFor={`pol-${id}`} className="block text-xs text-slate-700 mb-1">Pol</label>
-          <select id={`pol-${id}`} value={pol} onChange={(e) => setPol(e.target.value)} className={polje}>
-            <option value="">—</option>
-            <option value="M">Muški</option>
-            <option value="Ž">Ženski</option>
-          </select>
-        </div>
-        <div>
-          <label htmlFor={`odnos-${id}`} className="block text-xs text-slate-700 mb-1">Radni odnos</label>
-          <select id={`odnos-${id}`} value={radniOdnos} onChange={(e) => setRadniOdnos(e.target.value)} className={polje}>
-            <option value="neodređeno">Neodređeno</option>
-            <option value="određeno">Određeno</option>
-          </select>
-        </div>
-      </div>
-      <p className="text-xs text-slate-600">JMBG se ne čuva u aplikaciji; upisuje se ručno na odštampano rješenje.</p>
-      <button type="submit" disabled={slanje} className={`px-3 py-1.5 rounded-lg text-sm font-bold bg-slate-800 hover:bg-slate-900 text-white disabled:bg-slate-300 ${FOKUS}`}>{slanje ? 'Čuvanje…' : 'Sačuvaj podatke'}</button>
-    </form>
-  );
-}
-
-function JmbgForma({ korisnikId, maskiran, akcija, osvjezi }) {
-  const [unos, setUnos] = useState('');
-  const [uredjujem, setUredjujem] = useState(false);
-  const [slanje, setSlanje] = useState(false);
-  const polje = 'w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm bg-white tabular-nums tracking-wider';
-
-  const sacuvaj = async (vrijednost) => {
-    setSlanje(true);
-    const ok = await akcija({ akcija: 'jmbg', korisnikId, jmbg: vrijednost }, vrijednost ? 'JMBG je sačuvan.' : 'JMBG je uklonjen.');
-    setSlanje(false);
-    if (ok) { setUnos(''); setUredjujem(false); osvjezi(); }
-  };
-
-  if (maskiran && !uredjujem) {
-    return (
-      <div className="text-sm">
-        <p className="text-xs font-bold text-slate-600">JMBG</p>
-        <p className="mt-1 font-semibold tabular-nums tracking-wider text-slate-900">{maskiran}</p>
-        <div className="mt-1 flex gap-3">
-          <button onClick={() => setUredjujem(true)} className={`text-xs font-bold text-blue-700 hover:underline rounded ${FOKUS}`}>Promijeni</button>
-          <button onClick={() => sacuvaj('')} disabled={slanje} className={`text-xs font-bold text-red-700 hover:underline rounded disabled:opacity-50 ${FOKUS}`}>Ukloni</button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <form onSubmit={(e) => { e.preventDefault(); sacuvaj(unos); }} className="space-y-2">
-      <label htmlFor={`jmbg-${korisnikId}`} className="block text-xs font-bold text-slate-600">JMBG</label>
-      <input
-        id={`jmbg-${korisnikId}`}
-        inputMode="numeric"
-        autoComplete="off"
-        required
-        pattern="[0-9]{13}"
-        maxLength={13}
-        title="13 cifara"
-        value={unos}
-        onChange={(e) => setUnos(e.target.value.replace(/[^0-9]/g, ''))}
-        className={polje}
-      />
-      <p className="text-xs text-slate-600">Upisuje se na rješenje. U aplikaciji se poslije prikazuje samo zadnje 4 cifre.</p>
-      <div className="flex gap-2">
-        {uredjujem && <button type="button" onClick={() => setUredjujem(false)} className={`px-3 py-1.5 rounded-lg text-sm font-semibold bg-slate-100 hover:bg-slate-200 ${FOKUS}`}>Odustani</button>}
-        <button type="submit" disabled={slanje || unos.length !== 13} className={`px-3 py-1.5 rounded-lg text-sm font-bold bg-slate-800 hover:bg-slate-900 text-white disabled:bg-slate-300 ${FOKUS}`}>{slanje ? 'Čuvanje…' : 'Sačuvaj JMBG'}</button>
-      </div>
-    </form>
-  );
-}

@@ -96,8 +96,8 @@ begin
 end;
 $$;
 
--- 7) Praznici Crne Gore 2026–2030: državni i drugi praznici (dva dana, uz pomjeranje kad padnu
---    u nedjelju) i pravoslavni Badnji dan, Božić, Veliki petak i Vaskrs.
+-- 7) Praznici Crne Gore 2026–2030: državni i drugi praznici, uključujući Njegošev dan (dva dana,
+--    uz pomjeranje kad padnu u nedjelju) i pravoslavni Badnji dan, Božić, Veliki petak i Vaskrs.
 insert into public.praznici (datum, naziv) values
   ('2026-01-01', 'Nova godina'),
   ('2026-01-02', 'Nova godina'),
@@ -170,7 +170,18 @@ insert into public.praznici (datum, naziv) values
   ('2030-05-22', 'Dan nezavisnosti'),
   ('2030-07-13', 'Dan državnosti'),
   ('2030-07-14', 'Dan državnosti'),
-  ('2030-07-15', 'Dan državnosti (neradni dan)')
+  ('2030-07-15', 'Dan državnosti (neradni dan)'),
+  ('2026-11-13', 'Njegošev dan'),
+  ('2026-11-14', 'Njegošev dan'),
+  ('2027-11-13', 'Njegošev dan'),
+  ('2027-11-14', 'Njegošev dan'),
+  ('2027-11-15', 'Njegošev dan (neradni dan)'),
+  ('2028-11-13', 'Njegošev dan'),
+  ('2028-11-14', 'Njegošev dan'),
+  ('2029-11-13', 'Njegošev dan'),
+  ('2029-11-14', 'Njegošev dan'),
+  ('2030-11-13', 'Njegošev dan'),
+  ('2030-11-14', 'Njegošev dan')
 on conflict (datum) do nothing;
 
 -- 8) Dozvole za API i osvježavanje API-ja.

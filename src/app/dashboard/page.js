@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { ucitajMojeDozvole, DOZVOLE } from '@/lib/dozvole';
+import { ucitajMojeDozvole } from '@/lib/dozvole';
 import ExcelJS from 'exceljs';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -56,7 +56,6 @@ export default function Dashboard() {
   const [izabranaKategorija, setIzabranaKategorija] = useState('Sve'); 
   const [oprema, setOprema] = useState([]);
   const [istorija, setIstorija] = useState([]);
-  const [profili, setProfili] = useState([]); 
   const [komitenti, setKomitenti] = useState([]); 
   const [pretraga, setPretraga] = useState('');
   const [otvorenModal, setOtvorenModal] = useState(null); 
@@ -64,18 +63,6 @@ export default function Dashboard() {
   const [korisnikEmail, setKorisnikEmail] = useState(''); 
   const [uloga, setUloga] = useState(''); 
   const [dozvole, setDozvole] = useState([]);
-  const [uloge, setUloge] = useState([]);
-  const [ulogeGreskaPoruka, setUlogeGreskaPoruka] = useState('');
-  const [novaUlogaNaziv, setNovaUlogaNaziv] = useState('');
-  const [noviKorisnikKontakt, setNoviKorisnikKontakt] = useState('');
-  const [urediKorisnikKontakt, setUrediKorisnikKontakt] = useState('');
-  const [noviKorisnikIme, setNoviKorisnikIme] = useState('');
-  const [noviKorisnikLozinka, setNoviKorisnikLozinka] = useState('');
-  const [noviKorisnikUloga, setNoviKorisnikUloga] = useState('Korisnik');
-  const [urediKorisnikId, setUrediKorisnikId] = useState(null);
-  const [urediKorisnikIme, setUrediKorisnikIme] = useState('');
-  const [urediKorisnikLozinka, setUrediKorisnikLozinka] = useState('');
-  const [korisnikSlanje, setKorisnikSlanje] = useState(false);
 
   const [naziv, setNaziv] = useState('');
   const [oznaka, setOznaka] = useState('');
@@ -105,13 +92,7 @@ export default function Dashboard() {
   const [izabraniArtikal, setIzabraniArtikal] = useState(null);
   const [kolicinaAkcija, setKolicinaAkcija] = useState(1);
 
-  const [logZaBrisanje, setLogZaBrisanje] = useState(null);
-  const [vratiNaStanje, setVratiNaStanje] = useState(false);
 
-  const [adminKomitentNaziv, setAdminKomitentNaziv] = useState('');
-  const [adminKomitentGrad, setAdminKomitentGrad] = useState('');
-  const [adminKomitentTip, setAdminKomitentTip] = useState('Dobavljac');
-  const [urediKomitentId, setUrediKomitentId] = useState(null);
 
   const [artikalZaBrisanjeId, setArtikalZaBrisanjeId] = useState('');
   const [pregledOtpremnice, setPregledOtpremnice] = useState(null);
@@ -136,13 +117,6 @@ export default function Dashboard() {
       setDozvole(ja.dozvole);
       setUloga(ja.uloga);
 
-      if (ja.dozvole.includes('admin')) {
-        const { data: sviProfili } = await supabase.from('profili').select('*').order('email', { ascending: true });
-        if (sviProfili) setProfili(sviProfili);
-        const { data: sveUloge, error: ulogeGreska } = await supabase.from('uloge').select('*').order('naziv', { ascending: true });
-        setUloge(ulogeGreska ? [] : (sveUloge || []));
-        setUlogeGreskaPoruka(ulogeGreska ? ulogeGreska.message : (sveUloge?.length ? '' : 'Tabela uloga je prazna ili joj aplikacija nema pristup (grant select).'));
-      }
 
       const { data: komitentiData } = await supabase.from('komitenti').select('*').order('naziv', { ascending: true });
       if (komitentiData) setKomitenti(komitentiData);
@@ -173,8 +147,6 @@ export default function Dashboard() {
 
   const mozeDaPovlaciIUnosi = dozvole.includes('zalihe_knjizenje');
   const jeLiAdmin = dozvole.includes('admin');
-  // Uloge za padajuće liste; dok SQL za uloge nije pokrenut, prikazuju se stare tri.
-  const nazivUloga = uloge.length > 0 ? uloge.map(u => u.naziv) : ['Korisnik', 'Korisnik sa pravom povlacenja', 'Admin'];
 
   const dogodiSeIzmenaArtiklaUStavci = (index, opremaId) => {
     const noveStavke = [...stavkeOtpremnice];
@@ -291,183 +263,6 @@ export default function Dashboard() {
         const { error } = await supabase.from('oprema').delete().eq('id', art.id);
         if (!error) { inicijalizujAplikaciju(); } 
         else paziIPokreniObavestenje("Greška", "Nije moguće obrisati artikal. Možda je vezan za istoriju prometa.");
-        setPotvrdaModal(null);
-      }
-    });
-  };
-
-  const dogodiSeIzmenaKomitenta = async (e) => {
-    e.preventDefault();
-    if (!adminKomitentNaziv) return;
-    if (urediKomitentId) {
-      const { error } = await supabase.from('komitenti').update({ naziv: adminKomitentNaziv, fontGradi: adminKomitentGrad, tip: adminKomitentTip }).eq('id', urediKomitentId);
-      if (!error) { setUrediKomitentId(null); setAdminKomitentNaziv(''); setAdminKomitentGrad(''); inicijalizujAplikaciju(); }
-    } else {
-      const { error } = await supabase.from('komitenti').insert([{ naziv: adminKomitentNaziv, grad: adminKomitentGrad, tip: adminKomitentTip }]);
-      if (!error) { setAdminKomitentNaziv(''); setAdminKomitentGrad(''); inicijalizujAplikaciju(); }
-    }
-  };
-
-  const obrisiKomitenta = (id, ime) => {
-    setPotvrdaModal({
-      naslov: "Obriši komitenta",
-      poruka: `Da li ste sigurni da želite da uklonite komitenta "${ime}" iz sistema?`,
-      akcija: async () => { await supabase.from('komitenti').delete().eq('id', id); inicijalizujAplikaciju(); setPotvrdaModal(null); }
-    });
-  };
-
-  const promijeniUloguKorisnika = async (profilId, novaUloga) => {
-    const { error } = await supabase.from('profili').update({ uloga: novaUloga }).eq('id', profilId);
-    if (!error) { paziIPokreniObavestenje("Uspješno", "Uloga korisnika je uspešno promenjena!"); inicijalizujAplikaciju(); } 
-    else paziIPokreniObavestenje("Greška", error.message);
-  };
-
-  // Poziv serverske rute /api/korisnici (samo Admin). Nalozi se prave bez emaila.
-  const pozoviApi = async (adresa, metoda, tijelo) => {
-    const { data: { session } } = await supabase.auth.getSession();
-    const odgovor = await fetch(adresa, {
-      method: metoda,
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token || ''}` },
-      body: JSON.stringify(tijelo),
-    });
-    const rezultat = await odgovor.json().catch(() => ({}));
-    return { ok: odgovor.ok, poruka: rezultat.error };
-  };
-  const pozoviKorisnickiApi = (metoda, tijelo) => pozoviApi('/api/korisnici', metoda, tijelo);
-
-  // ---- Uloge i dozvole ----
-  const promijeniDozvoluUloge = async (naziv, kljuc, ukljuceno) => {
-    const u = uloge.find(x => x.naziv === naziv);
-    if (!u) return;
-    const stare = u.dozvole || [];
-    const nove = ukljuceno ? [...new Set([...stare, kljuc])] : stare.filter(d => d !== kljuc);
-    setUloge(lista => lista.map(x => x.naziv === naziv ? { ...x, dozvole: nove } : x));
-    const { ok, poruka } = await pozoviApi('/api/uloge', 'PATCH', { naziv, dozvole: nove });
-    if (!ok) {
-      setUloge(lista => lista.map(x => x.naziv === naziv ? { ...x, dozvole: stare } : x));
-      return paziIPokreniObavestenje("Dozvola nije sačuvana", poruka || 'Došlo je do greške. Pokušaj ponovo.');
-    }
-    if (naziv === uloga) inicijalizujAplikaciju();
-  };
-
-  const dodajUlogu = async (e) => {
-    e.preventDefault();
-    const naziv = novaUlogaNaziv.trim();
-    const { ok, poruka } = await pozoviApi('/api/uloge', 'POST', { naziv, dozvole: ['zalihe_pregled', 'odsustvo_zahtjev'] });
-    if (!ok) return paziIPokreniObavestenje("Uloga nije dodata", poruka || 'Došlo je do greške. Pokušaj ponovo.');
-    setNovaUlogaNaziv('');
-    inicijalizujAplikaciju();
-  };
-
-  const obrisiUlogu = (naziv) => {
-    setPotvrdaModal({
-      naslov: "Obriši ulogu",
-      poruka: `Uloga "${naziv}" će biti obrisana. Moguće je samo ako je nijedan korisnik nema.`,
-      akcija: async () => {
-        setPotvrdaModal(null);
-        const { ok, poruka } = await pozoviApi('/api/uloge', 'DELETE', { naziv });
-        if (!ok) return paziIPokreniObavestenje("Uloga nije obrisana", poruka || 'Došlo je do greške. Pokušaj ponovo.');
-        inicijalizujAplikaciju();
-      },
-    });
-  };
-
-  const kreirajKorisnika = async (e) => {
-    e.preventDefault();
-    if (korisnikSlanje) return;
-    setKorisnikSlanje(true);
-    try {
-      const ime = noviKorisnikIme.trim().toLowerCase();
-      const { ok, poruka } = await pozoviKorisnickiApi('POST', { korisnickoIme: ime, lozinka: noviKorisnikLozinka, uloga: noviKorisnikUloga, kontaktEmail: noviKorisnikKontakt });
-      if (!ok) return paziIPokreniObavestenje("Korisnik nije kreiran", poruka || 'Došlo je do greške. Pokušaj ponovo.');
-      paziIPokreniObavestenje("Korisnik je kreiran", `Korisnik "${ime}" se sada može prijaviti svojim korisničkim imenom i lozinkom.`);
-      setNoviKorisnikIme('');
-      setNoviKorisnikLozinka('');
-      setNoviKorisnikUloga('Korisnik');
-      setNoviKorisnikKontakt('');
-      inicijalizujAplikaciju();
-    } finally {
-      setKorisnikSlanje(false);
-    }
-  };
-
-  const korisnickoImeIz = (email) => (email || '').replace('@evidentory.com', '');
-
-  const pocniUredjivanjeKorisnika = (p) => {
-    setUrediKorisnikId(p.id);
-    setUrediKorisnikIme(korisnickoImeIz(p.email));
-    setUrediKorisnikLozinka('');
-    setUrediKorisnikKontakt(p.kontakt_email || '');
-  };
-
-  const odustaniOdUredjivanja = () => {
-    setUrediKorisnikId(null);
-    setUrediKorisnikIme('');
-    setUrediKorisnikLozinka('');
-  };
-
-  const sacuvajKorisnika = async (e) => {
-    e.preventDefault();
-    if (korisnikSlanje) return;
-    setKorisnikSlanje(true);
-    try {
-      const ime = urediKorisnikIme.trim().toLowerCase();
-      const { ok, poruka } = await pozoviKorisnickiApi('PATCH', {
-        id: urediKorisnikId,
-        korisnickoIme: ime,
-        lozinka: urediKorisnikLozinka || undefined,
-        kontaktEmail: urediKorisnikKontakt,
-      });
-      if (!ok) return paziIPokreniObavestenje("Izmjena nije sačuvana", poruka || 'Došlo je do greške. Pokušaj ponovo.');
-      paziIPokreniObavestenje("Korisnik je izmijenjen", urediKorisnikLozinka
-        ? `Korisnik "${ime}" je sačuvan, sa novom lozinkom.`
-        : `Korisnik "${ime}" je sačuvan. Lozinka je ostala ista.`);
-      odustaniOdUredjivanja();
-      inicijalizujAplikaciju();
-    } finally {
-      setKorisnikSlanje(false);
-    }
-  };
-
-  const obrisiKorisnika = (p) => {
-    const ime = korisnickoImeIz(p.email);
-    setPotvrdaModal({
-      naslov: "Obriši korisnika",
-      poruka: `Korisnik "${ime}" više neće moći da se prijavi. Njegovi dosadašnji unosi u istoriji prometa ostaju sačuvani. Ova akcija se ne može poništiti.`,
-      akcija: async () => {
-        setPotvrdaModal(null);
-        const { ok, poruka } = await pozoviKorisnickiApi('DELETE', { id: p.id });
-        if (!ok) return paziIPokreniObavestenje("Korisnik nije obrisan", poruka || 'Došlo je do greške. Pokušaj ponovo.');
-        paziIPokreniObavestenje("Korisnik je obrisan", `Nalog "${ime}" je uklonjen.`);
-        inicijalizujAplikaciju();
-      },
-    });
-  };
-
-  const otvoriBrisanjeLoga = (log) => {
-    setLogZaBrisanje(log);
-    setVratiNaStanje(log.tip === 'IZLAZ_OTPREMNICA'); 
-    setOtvorenModal('brisanjeLoga');
-  };
-
-  const potvrdiBrisanjeLoga = async () => {
-    if (!logZaBrisanje) return;
-    if (vratiNaStanje && logZaBrisanje.tip === 'IZLAZ_OTPREMNICA') {
-      const art = oprema.find(o => o.naziv === logZaBrisanje.artikal);
-      if (art) await supabase.from('oprema').update({ kolicina: art.kolicina + logZaBrisanje.kolicina }).eq('id', art.id);
-    }
-    await supabase.from('istorija').delete().eq('id', logZaBrisanje.id);
-    setOtvorenModal(null); setLogZaBrisanje(null); inicijalizujAplikaciju();
-  };
-
-  const isprazniKompletnuIstoriju = () => {
-    setPotvrdaModal({
-      naslov: "Resetuj kompletnu istoriju prometa",
-      poruka: "⚠️ PAŽNJA: Želite da obrišete CELU istoriju prometa. Ova akcija je nepovratna i vratiće statistiku u nulto stanje. Da li želite da nastavite?",
-      akcija: async () => {
-        const { error } = await supabase.from('istorija').delete().neq('id', 0);
-        if (!error) { paziIPokreniObavestenje("Uspješno očišćeno", "Istorija prometa je uspešno vraćena na nulu!"); } 
-        else paziIPokreniObavestenje("Greška", error.message);
         setPotvrdaModal(null);
       }
     });
@@ -962,9 +757,9 @@ export default function Dashboard() {
             {jeLiAdmin && (
               <div className="space-y-1">
                 <p className="px-4 text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Podešavanja</p>
-                <button onClick={() => setOtvorenModal('podesavanja')} className="w-full flex items-center gap-2.5 px-4 py-2 rounded-xl text-xs font-medium hover:bg-slate-800/30 hover:text-slate-200 transition-all">
+                <button onClick={() => router.push('/admin')} className="w-full flex items-center gap-2.5 px-4 py-2 rounded-xl text-xs font-medium hover:bg-slate-800/30 hover:text-slate-200 transition-all">
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-                  Kontrolni Panel
+                  Administracija
                 </button>
               </div>
             )}
@@ -1595,273 +1390,6 @@ export default function Dashboard() {
                       <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold shadow-md">Sačuvaj izmjene</button>
                   </div>
               </form>
-          </div>
-        </div>
-      )}
-
-      {/* KONTROLNI PANEL ADMINISTRATORA */}
-      {otvorenModal === 'podesavanja' && jeLiAdmin && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4 overflow-y-auto">
-          <div className="bg-white p-6 rounded-2xl shadow-2xl w-full max-w-4xl border border-slate-100 my-8 animate-fade-in">
-            <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-3">
-              <div>
-                <h2 className="text-xl font-bold text-slate-800 tracking-tight">Kontrolni panel administratora</h2>
-                <p className="text-xs text-slate-400 mt-1">Upravljanje pravima korisnika, bazom partnera i podacima</p>
-              </div>
-              <button onClick={() => setOtvorenModal(null)} className="text-slate-400 hover:text-slate-600 text-xl font-bold p-1">✕</button>
-            </div>
-
-            <div className="space-y-8 max-h-[70vh] overflow-y-auto pr-2 no-scrollbar">
-              <div className="border border-slate-200 rounded-2xl p-5 bg-white space-y-4">
-                <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider border-b border-slate-100 pb-2">Upravljanje bazom komitenata</h3>
-                <form onSubmit={dogodiSeIzmenaKomitenta} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end bg-slate-50 p-3 rounded-xl border border-slate-200">
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-500 mb-1">Ime *</label>
-                    <input required placeholder="Ime" value={adminKomitentNaziv} onChange={e=>setAdminKomitentNaziv(e.target.value)} className="w-full border border-slate-200 p-2 rounded-lg text-xs bg-white outline-none focus:border-blue-500 font-semibold" />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-500 mb-1">Grad</label>
-                    <input placeholder="Grad" value={adminKomitentGrad} onChange={e=>setAdminKomitentGrad(e.target.value)} className="w-full border border-slate-200 p-2 rounded-lg text-xs bg-white outline-none focus:border-blue-500 font-medium" />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-500 mb-1">Tip partnera</label>
-                    <select value={adminKomitentTip} onChange={e=>setAdminKomitentTip(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg text-xs bg-white outline-none focus:border-blue-500 font-semibold text-slate-700">
-                      <option value="Dobavljac">Dobavljač (Snabdevač)</option>
-                      <option value="Kupac">Kupac (Prodajemo mu)</option>
-                      <option value="Oboje">Obostrano (Oba tipa)</option>
-                    </select>
-                  </div>
-                  <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white text-xs py-2 rounded-lg font-bold transition-all shadow-md">{urediKomitentId ? 'Sačuvaj izmjene' : '➕ Dodaj u bazu'}</button>
-                </form>
-
-                <div className="border border-slate-200 rounded-xl overflow-hidden max-h-[200px] overflow-y-auto no-scrollbar">
-                  <table className="w-full text-left text-xs border-collapse">
-                    <thead className="bg-slate-100 border-b border-slate-200 text-slate-500 font-bold sticky top-0">
-                      <tr>
-                        <th className="px-4 py-2">Ime partnera</th>
-                        <th className="px-4 py-2">Grad</th>
-                        <th className="px-4 py-2">Tip u sistemu</th>
-                        <th className="px-4 py-2 text-center">Akcije</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-200 bg-white">
-                      {komitenti.map(k => (
-                        <tr key={k.id} className="hover:bg-slate-50/50">
-                          <td className="px-4 py-2.5 font-semibold text-slate-800">{k.naziv}</td>
-                          <td className="px-4 py-2.5 text-slate-500">{k.grad || '-'}</td>
-                          <td className="px-4 py-2.5">
-                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${k.tip === 'Dobavljac' ? 'bg-orange-50 text-orange-700 border border-orange-100' : k.tip === 'Kupac' ? 'bg-blue-50 text-blue-700 border border-blue-100' : 'bg-purple-50 text-purple-700 border border-purple-100'}`}>{k.tip}</span>
-                          </td>
-                          <td className="px-4 py-2.5 text-center space-x-2">
-                            <button type="button" onClick={() => { setUrediKomitentId(k.id); setAdminKomitentNaziv(k.naziv); setAdminKomitentGrad(k.grad || ''); setAdminKomitentTip(k.tip); }} className="text-blue-600 hover:text-blue-800 font-bold">Uredi</button>
-                            <button type="button" onClick={() => obrisiKomitenta(k.id, k.naziv)} className="text-red-500 hover:text-red-700 font-bold">✕</button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              <div className="border border-slate-200 rounded-2xl p-5 bg-white">
-                <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-3">Uloge i dozvole korisnika</h3>
-                <form onSubmit={kreirajKorisnika} className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end bg-slate-50 p-3 rounded-xl border border-slate-200 mb-4">
-                  <div>
-                    <label htmlFor="novi-ime" className="block text-[11px] font-bold text-slate-600 mb-1">Novi korisnik: korisničko ime *</label>
-                    <input id="novi-ime" required minLength={3} maxLength={30} pattern="[A-Za-z0-9._\-]+" title="Slova bez kvačica, brojevi, tačka, crtica i donja crta" autoComplete="off" placeholder="npr. marko" value={noviKorisnikIme} onChange={e => setNoviKorisnikIme(e.target.value)} className="w-full border border-slate-200 p-2 rounded-lg text-xs bg-white outline-none focus:border-blue-500 font-semibold" />
-                  </div>
-                  <div>
-                    <label htmlFor="novi-lozinka" className="block text-[11px] font-bold text-slate-600 mb-1">Lozinka (najmanje 6 znakova) *</label>
-                    <input id="novi-lozinka" type="text" required minLength={6} autoComplete="off" value={noviKorisnikLozinka} onChange={e => setNoviKorisnikLozinka(e.target.value)} className="w-full border border-slate-200 p-2 rounded-lg text-xs bg-white outline-none focus:border-blue-500 font-semibold" />
-                  </div>
-                  <div>
-                    <label htmlFor="novi-kontakt" className="block text-[11px] font-bold text-slate-600 mb-1">Email za obavještenja</label>
-                    <input id="novi-kontakt" type="email" autoComplete="off" placeholder="ime@firma.com" value={noviKorisnikKontakt} onChange={e => setNoviKorisnikKontakt(e.target.value)} className="w-full border border-slate-200 p-2 rounded-lg text-xs bg-white outline-none focus:border-blue-500 font-semibold" />
-                  </div>
-                  <div>
-                    <label htmlFor="novi-uloga" className="block text-[11px] font-bold text-slate-600 mb-1">Uloga</label>
-                    <select id="novi-uloga" value={noviKorisnikUloga} onChange={e => setNoviKorisnikUloga(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg text-xs bg-white outline-none focus:border-blue-500 font-semibold text-slate-700">
-                      {nazivUloga.map(n => <option key={n} value={n}>{n}</option>)}
-                    </select>
-                  </div>
-                  <button type="submit" disabled={korisnikSlanje} className="w-full bg-blue-600 hover:bg-blue-700 text-white text-xs py-2 rounded-lg font-bold transition-all shadow-md disabled:bg-blue-400 disabled:cursor-wait">{korisnikSlanje ? 'Spremanje…' : 'Kreiraj korisnika'}</button>
-                </form>
-                <div className="border border-slate-200 rounded-xl overflow-hidden bg-slate-50/50">
-                  <table className="w-full text-left text-sm">
-                    <thead>
-                      <tr className="bg-slate-100 border-b border-slate-200">
-                        <th className="px-4 py-2 text-xs font-semibold text-slate-500">Korisnik</th>
-                        <th className="px-4 py-2 text-xs font-semibold text-slate-500 text-right">Dodijeljena uloga</th>
-                        <th className="px-4 py-2 text-xs font-semibold text-slate-500 text-right">Akcije</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-200">
-                      {profili.map(p => urediKorisnikId === p.id ? (
-                        <tr key={p.id} className="bg-white">
-                          <td colSpan={3} className="px-4 py-3">
-                            <form onSubmit={sacuvajKorisnika} className="flex flex-col md:flex-row md:items-end gap-3">
-                              <div className="flex-1">
-                                <label htmlFor="uredi-ime" className="block text-[11px] font-bold text-slate-600 mb-1">Korisničko ime *</label>
-                                <input id="uredi-ime" required minLength={3} maxLength={30} pattern="[A-Za-z0-9._\-]+" title="Slova bez kvačica, brojevi, tačka, crtica i donja crta" autoComplete="off" value={urediKorisnikIme} onChange={e => setUrediKorisnikIme(e.target.value)} className="w-full border border-slate-300 px-2 py-1.5 rounded-lg text-xs bg-white font-semibold text-slate-700 outline-none focus:border-blue-500" />
-                              </div>
-                              <div className="flex-1">
-                                <label htmlFor="uredi-kontakt" className="block text-[11px] font-bold text-slate-600 mb-1">Email za obavještenja</label>
-                                <input id="uredi-kontakt" type="email" autoComplete="off" placeholder="ime@firma.com" value={urediKorisnikKontakt} onChange={e => setUrediKorisnikKontakt(e.target.value)} className="w-full border border-slate-300 px-2 py-1.5 rounded-lg text-xs bg-white font-semibold text-slate-700 outline-none focus:border-blue-500" />
-                              </div>
-                              <div className="flex-1">
-                                <label htmlFor="uredi-lozinka" className="block text-[11px] font-bold text-slate-600 mb-1">Nova lozinka (prazno = ostaje ista)</label>
-                                <input id="uredi-lozinka" type="text" minLength={6} autoComplete="off" value={urediKorisnikLozinka} onChange={e => setUrediKorisnikLozinka(e.target.value)} className="w-full border border-slate-300 px-2 py-1.5 rounded-lg text-xs bg-white font-semibold text-slate-700 outline-none focus:border-blue-500" />
-                              </div>
-                              <div className="flex gap-2">
-                                <button type="button" onClick={odustaniOdUredjivanja} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs rounded-lg font-bold">Odustani</button>
-                                <button type="submit" disabled={korisnikSlanje} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded-lg font-bold disabled:bg-blue-400 disabled:cursor-wait">{korisnikSlanje ? 'Spremanje…' : 'Sačuvaj'}</button>
-                              </div>
-                            </form>
-                          </td>
-                        </tr>
-                      ) : (
-                        <tr key={p.id} className="hover:bg-white transition-colors">
-                          <td className="px-4 py-3">
-                            <p className="font-medium text-slate-700">{korisnickoImeIz(p.email)}</p>
-                            <p className="text-xs text-slate-600">{p.kontakt_email || 'bez emaila za obavještenja'}</p>
-                          </td>
-                          <td className="px-4 py-3 text-right">
-                            <select aria-label={`Uloga korisnika ${korisnickoImeIz(p.email)}`} value={p.uloga} onChange={(e) => promijeniUloguKorisnika(p.id, e.target.value)} className="border border-slate-300 px-2 py-1.5 rounded-lg text-xs bg-white font-semibold text-slate-700 outline-none focus:border-blue-500">
-                              {nazivUloga.map(n => <option key={n} value={n}>{n}</option>)}
-                            </select>
-                          </td>
-                          <td className="px-4 py-3 text-right whitespace-nowrap space-x-3">
-                            <button type="button" onClick={() => pocniUredjivanjeKorisnika(p)} className="text-blue-700 hover:text-blue-900 text-xs font-bold">Uredi</button>
-                            {korisnickoImeIz(p.email) !== korisnikEmail && (
-                              <button type="button" onClick={() => obrisiKorisnika(p)} className="text-red-600 hover:text-red-800 text-xs font-bold">Obriši</button>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              <div className="border border-slate-200 rounded-2xl p-5 bg-white">
-                <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-1">Uloge i dozvole</h3>
-                <p className="text-xs text-slate-600 mb-3">Čekiraj šta svaka uloga smije. Promjena važi odmah za sve korisnike sa tom ulogom.</p>
-                {uloge.length === 0 ? (
-                  <p className="text-xs text-slate-700 bg-amber-50 border border-amber-200 rounded-lg p-3">Aplikacija ne može da pročita uloge. Pokreni SQL "uloge-dozvole.sql" u Supabase-u pa osvježi stranicu.{ulogeGreskaPoruka && <span className="block mt-1 font-mono text-[11px] text-slate-600">Detalj: {ulogeGreskaPoruka}</span>}</p>
-                ) : (
-                  <>
-                    <div className="border border-slate-200 rounded-xl overflow-x-auto">
-                      <table className="w-full text-left text-xs">
-                        <thead className="bg-slate-100 border-b border-slate-200">
-                          <tr>
-                            <th className="px-3 py-2 font-semibold text-slate-600">Uloga</th>
-                            {DOZVOLE.map(d => (
-                              <th key={d.kljuc} className="px-2 py-2 font-semibold text-slate-600 text-center align-bottom">
-                                <span className="block text-[10px] text-slate-500 font-medium">{d.grupa}</span>
-                                {d.naziv}
-                              </th>
-                            ))}
-                            <th className="px-3 py-2"><span className="sr-only">Akcije</span></th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-200 bg-white">
-                          {uloge.map(u => (
-                            <tr key={u.naziv}>
-                              <td className="px-3 py-2.5 font-semibold text-slate-800 whitespace-nowrap">{u.naziv}</td>
-                              {DOZVOLE.map(d => (
-                                <td key={d.kljuc} className="px-2 py-2.5 text-center">
-                                  <input
-                                    type="checkbox"
-                                    aria-label={`${u.naziv}: ${d.naziv}`}
-                                    checked={(u.dozvole || []).includes(d.kljuc)}
-                                    onChange={e => promijeniDozvoluUloge(u.naziv, d.kljuc, e.target.checked)}
-                                    className="w-4 h-4 accent-blue-600 cursor-pointer"
-                                  />
-                                </td>
-                              ))}
-                              <td className="px-3 py-2.5 text-right">
-                                {u.naziv !== uloga && (
-                                  <button type="button" onClick={() => obrisiUlogu(u.naziv)} className="text-red-600 hover:text-red-800 font-bold">Obriši</button>
-                                )}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                    <form onSubmit={dodajUlogu} className="flex flex-col sm:flex-row sm:items-end gap-3 mt-3">
-                      <div className="flex-1">
-                        <label htmlFor="nova-uloga" className="block text-[11px] font-bold text-slate-600 mb-1">Nova uloga (npr. Office manager, Direktor)</label>
-                        <input id="nova-uloga" required minLength={2} maxLength={50} value={novaUlogaNaziv} onChange={e => setNovaUlogaNaziv(e.target.value)} className="w-full border border-slate-200 p-2 rounded-lg text-xs bg-white outline-none focus:border-blue-500 font-semibold" />
-                      </div>
-                      <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-4 py-2 rounded-lg font-bold">Dodaj ulogu</button>
-                    </form>
-                  </>
-                )}
-              </div>
-
-              <div className="border border-slate-200 rounded-2xl p-5 bg-white">
-                <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-3">Istorija i reset sistema</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="border border-slate-200 rounded-xl p-4 bg-white space-y-3">
-                    <h4 className="text-xs font-bold text-slate-600">Obriši pojedinačni log prometa</h4>
-                    <div className="space-y-2 max-h-[140px] overflow-y-auto pr-1 no-scrollbar">
-                      {istorija.length === 0 ? ( <p className="text-xs text-slate-400 italic">Istorija je prazna.</p> ) : (
-                        istorija.map(log => (
-                          <div key={log.id} className="flex justify-between items-center text-xs bg-slate-50 p-2 rounded-lg border border-slate-100">
-                            <div className="truncate flex-1 mr-2">
-                              <span className="font-semibold text-slate-700">{log.artikal}</span>
-                              <p className="text-[10px] text-slate-400">{new Date(log.created_at).toLocaleDateString('sr-RS')} ({log.tip.replace('_', ' ')})</p>
-                            </div>
-                            <button onClick={() => otvoriBrisanjeLoga(log)} className="text-red-500 hover:text-red-700 font-bold px-1.5 py-0.5 hover:bg-red-50 rounded">✕</button>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                  <div className="border border-slate-200 rounded-2xl p-4 bg-red-50/10 border-red-100 flex flex-col justify-between">
-                    <div>
-                      <h4 className="text-xs font-bold text-red-600">Resetuj istoriju prometa</h4>
-                      <p className="text-[11px] text-slate-400 mt-2">Ova opcija briše sve stavke u istoriji prometa i vraća tabelu u prvobitno nulto stanje.</p>
-                    </div>
-                    <button type="button" onClick={isprazniKompletnuIstoriju} className="w-full bg-red-600 hover:bg-red-700 text-white py-2 rounded-xl text-xs font-bold shadow-lg shadow-red-200/50 mt-4">⚠️ Isprazni kompletnu istoriju prometa</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className="flex justify-end pt-5 mt-6 border-t border-slate-100">
-              <button onClick={() => setOtvorenModal(null)} className="px-5 py-2.5 bg-slate-800 text-white rounded-xl text-sm font-bold hover:bg-slate-900 transition-colors">Zatvori panel</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* PAMETNI MODAL: BRISANJE LOGA SA POVRATOM NA STANJE */}
-      {otvorenModal === 'brisanjeLoga' && logZaBrisanje && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 animate-fade-in">
-          <div className="bg-white p-6 rounded-2xl shadow-2xl w-full max-w-md border border-slate-100">
-            <h3 className="text-lg font-bold text-red-600 flex items-center gap-2">⚠️ Brisanje zapisa iz istorije</h3>
-            <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl mt-4 mb-4">
-              <p className="text-xs text-slate-500 font-bold uppercase tracking-wider mb-1">Detalji zapisa:</p>
-              <p className="text-sm font-semibold text-slate-800">{logZaBrisanje.artikal}</p>
-              <p className="text-xs text-slate-600 mt-1">Količina: <span className="font-bold">{logZaBrisanje.kolicina}</span> | Tip: {logZaBrisanje.tip.replace('_', ' ')}</p>
-            </div>
-            <p className="text-sm text-slate-600 mb-4">Da li ste sigurni da želite trajno obrisati ovaj zapis?</p>
-            {logZaBrisanje.tip === 'IZLAZ_OTPREMNICA' && (
-              <div className="bg-blue-50/50 border border-blue-100 p-3 rounded-xl mb-4">
-                <label className="flex items-start gap-3 cursor-pointer">
-                  <input type="checkbox" checked={vratiNaStanje} onChange={(e) => setVratiNaStanje(e.target.checked)} className="mt-1 w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500" />
-                  <div className="flex-1">
-                    <span className="block text-sm font-bold text-slate-800">Vrati količinu na zalihe</span>
-                    <span className="block text-[11px] text-slate-500 mt-0.5">Fizičko stanje ovog artikla će se automatski povećati za {logZaBrisanje.kolicina} komada.</span>
-                  </div>
-                </label>
-              </div>
-            )}
-            <div className="flex justify-end gap-3 pt-4 mt-2 border-t border-slate-100">
-              <button type="button" onClick={() => setOtvorenModal('podesavanja')} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-xl transition-colors">Otkaži</button>
-              <button type="button" onClick={potvrdiBrisanjeLoga} className="px-5 py-2 bg-red-600 text-white text-sm font-bold rounded-xl shadow-md">Trajno obriši</button>
-            </div>
           </div>
         </div>
       )}

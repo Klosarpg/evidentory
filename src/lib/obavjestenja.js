@@ -1,6 +1,6 @@
 import { posaljiEmail, problemSaPodesavanjem } from '@/lib/email';
 import { napraviRjesenje, nazivFajlaRjesenja } from '@/lib/rjesenje';
-import { TIPOVI, formatirajDatum, formatirajSlavu } from '@/lib/odsustvo';
+import { TIPOVI, formatirajDatum, formatirajSlavu, periodZaDatum, granicePerioda, nazivPerioda } from '@/lib/odsustvo';
 import { ucitajSlikeFirme, ucitajJmbg } from '@/lib/slikeFirme';
 
 // Ko dobija koji email za slobodne dane.
@@ -60,7 +60,7 @@ function detalji(z) {
 const upozorenje = (rezultat, kome) => (rezultat.ok ? [] : [`${kome}: ${rezultat.greska}`]);
 
 // Novi zahtjev → svi odobravači.
-export async function obavijestiNoviZahtjev(supabase, zahtjev, adresa) {
+export async function obavijestiNoviZahtjev(supabase, zahtjev, adresa, { manjak = 0 } = {}) {
   const prima = await emailoviSaDozvolom(supabase, 'odsustvo_odobravanje', zahtjev.korisnik_id);
   if (prima.length === 0) {
     return pripremi(['Nema drugog odobravača sa upisanim emailom (podnosilac zahtjeva ne dobija obavještenje o sopstvenom zahtjevu), pa obavještenje nije poslato.'], []);
@@ -70,8 +70,10 @@ export async function obavijestiNoviZahtjev(supabase, zahtjev, adresa) {
     naslov: `Novi zahtjev za slobodne dane: ${zahtjev.korisnik_ime}`,
     sadrzaj: {
       naslov: 'Novi zahtjev čeka odobrenje',
-      uvod: `${zahtjev.korisnik_ime} traži slobodne dane.`,
-      redovi: detalji(zahtjev),
+      uvod: manjak > 0
+        ? `${zahtjev.korisnik_ime} traži ${zahtjev.radnih_dana} radnih dana, a slobodno ima ${zahtjev.radnih_dana - manjak}. Zahtjev svejedno možeš odobriti.`
+        : `${zahtjev.korisnik_ime} traži slobodne dane.`,
+      redovi: [...detalji(zahtjev), ...(manjak > 0 ? [['Slobodno ima', `${zahtjev.radnih_dana - manjak} (fali ${manjak})`]] : [])],
       dugme: { tekst: 'Otvori zahtjeve na odobravanju', adresa: `${adresa}/odsustvo` },
     },
   }), 'Odobravači')]);
@@ -159,10 +161,10 @@ export async function pripremiRjesenje(supabase, zahtjev, datum) {
   }
   const datumRjesenja = zahtjev.datum_rjesenja || datum;
 
-  const godina = zahtjev.datum_od.slice(0, 4);
+  const g = granicePerioda(periodZaDatum(zahtjev.datum_od));
   const { data: raniji } = await supabase.from('odsustva').select('id, datum_od')
     .eq('korisnik_id', zahtjev.korisnik_id).eq('tip', 'godisnji').eq('status', 'odobreno')
-    .gte('datum_od', `${godina}-01-01`).lte('datum_od', `${godina}-12-31`);
+    .gte('datum_od', g.od).lte('datum_od', g.do);
   const redni = (raniji || []).filter((o) => o.id !== zahtjev.id && o.datum_od < zahtjev.datum_od).length + 1;
 
   const [jmbg, slike] = await Promise.all([
@@ -188,19 +190,18 @@ export async function podsjetnikSlava(korisnik, datumSlave, adresa) {
   return upozorenje(r, korisnik.kontakt_email);
 }
 
-// Podsjetnik 30. decembra: neiskorišćeni dani ove godine važe još do 30. juna sljedeće godine.
-// stanje je izračunato za sljedeću godinu, pa je "prenos" upravo ovogodišnji ostatak.
+// Podsjetnik 30. decembra, 6 mjeseci prije isteka perioda (30. juna): neiskorišćeni dani propadaju.
 export async function podsjetnikPrenos(korisnik, stanje, adresa) {
   const r = await posaljiEmail({
     prima: korisnik.kontakt_email,
-    naslov: `Imaš ${stanje.prenosPreostalo} neiskorišćenih dana koji ističu ${formatirajDatum(stanje.rokPrenosa)}`,
+    naslov: `Imaš ${stanje.preostalo} neiskorišćenih dana godišnjeg koji ističu ${formatirajDatum(stanje.istice)}`,
     sadrzaj: {
       naslov: 'Iskoristi preostale slobodne dane',
-      uvod: `Imaš ${stanje.prenosPreostalo} neiskorišćenih dana godišnjeg odmora iz ${stanje.godina - 1}. godine. Prenose se u ${stanje.godina}. godinu, ali važe samo do ${formatirajDatum(stanje.rokPrenosa)}. Iskoristi ih do tada, inače propadaju.`,
+      uvod: `Od godišnjeg odmora za period ${nazivPerioda(stanje.period)} ostalo ti je ${stanje.preostalo} dana. Važe do ${formatirajDatum(stanje.istice)}, a 1. jula dobijaš novih ${stanje.kvota}. Neiskorišćeni dani se ne prenose.`,
       redovi: [
-        [`Neiskorišćeno iz ${stanje.godina - 1}.`, String(stanje.prenosPreostalo)],
-        ['Važi do', formatirajDatum(stanje.rokPrenosa)],
-        [`Novi godišnji za ${stanje.godina}.`, `${stanje.kvota} dana`],
+        ['Preostalo', String(stanje.preostalo)],
+        ['Iskorišćeno', `${stanje.iskoristeno} od ${stanje.kvota}`],
+        ['Važi do', formatirajDatum(stanje.istice)],
       ],
       dugme: { tekst: 'Zatraži slobodne dane', adresa: `${adresa}/odsustvo` },
     },
