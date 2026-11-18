@@ -19,7 +19,26 @@ async function pozoviApi(tijelo) {
     body: JSON.stringify(tijelo),
   });
   const rezultat = await odgovor.json().catch(() => ({}));
-  return { ok: odgovor.ok, poruka: rezultat.error };
+  return { ok: odgovor.ok, poruka: rezultat.error, upozorenja: rezultat.upozorenja || [] };
+}
+
+async function preuzmiRjesenje(id) {
+  const { data: { session } } = await supabase.auth.getSession();
+  const odgovor = await fetch(`/api/odsustvo?rjesenje=${id}`, {
+    headers: { Authorization: `Bearer ${session?.access_token || ''}` },
+  });
+  if (!odgovor.ok) {
+    const r = await odgovor.json().catch(() => ({}));
+    return r.error || 'Rješenje nije preuzeto.';
+  }
+  const naziv = /filename="([^"]+)"/.exec(odgovor.headers.get('Content-Disposition') || '')?.[1] || 'rjesenje.pdf';
+  const url = URL.createObjectURL(await odgovor.blob());
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = naziv;
+  a.click();
+  URL.revokeObjectURL(url);
+  return null;
 }
 
 const STIL_STATUSA = {
@@ -50,7 +69,7 @@ export default function Odsustvo() {
   const [profili, setProfili] = useState([]);
   const [korekcije, setKorekcije] = useState([]);
   const [tab, setTab] = useState(null);
-  const [poruka, setPoruka] = useState(null); // { tip: 'uspjeh' | 'greska', tekst }
+  const [poruka, setPoruka] = useState(null); // { tip: 'uspjeh' | 'greska', tekst, upozorenja? }
 
   const danas = danasUCrnojGori();
   const godina = Number(danas.slice(0, 4));
@@ -67,7 +86,7 @@ export default function Odsustvo() {
 
     const upitOdsustva = supabase.from('odsustva').select('*').order('datum_od', { ascending: false });
     const upitKorekcije = supabase.from('odsustvo_korekcije').select('*');
-    const upitProfili = supabase.from('profili').select('id, email, kontakt_email, slava_datum, slava_naziv').order('email');
+    const upitProfili = supabase.from('profili').select('*').order('email');
     const [p, o, k, pr] = await Promise.all([
       supabase.from('praznici').select('datum, naziv'),
       vidiSve ? upitOdsustva : upitOdsustva.eq('korisnik_id', id),
@@ -92,8 +111,8 @@ export default function Odsustvo() {
   useEffect(() => { ucitaj(); }, [ucitaj]);
 
   const akcija = async (tijelo, uspjeh) => {
-    const { ok, poruka: tekst } = await pozoviApi(tijelo);
-    setPoruka(ok ? { tip: 'uspjeh', tekst: uspjeh } : { tip: 'greska', tekst: tekst || 'Došlo je do greške. Pokušaj ponovo.' });
+    const { ok, poruka: tekst, upozorenja } = await pozoviApi(tijelo);
+    setPoruka(ok ? { tip: 'uspjeh', tekst: uspjeh, upozorenja } : { tip: 'greska', tekst: tekst || 'Došlo je do greške. Pokušaj ponovo.' });
     if (ok) await ucitaj();
     return ok;
   };
@@ -117,7 +136,8 @@ export default function Odsustvo() {
     d.includes('odsustvo_pregled_svih') && { kljuc: 'svi', naziv: 'Svi korisnici' },
   ].filter(Boolean);
 
-  const zajedno = { ja, praznici, odsustva, profili, korekcije, danas, godina, akcija };
+  const javiGresku = (tekst) => setPoruka({ tip: 'greska', tekst });
+  const zajedno = { ja, praznici, odsustva, profili, korekcije, danas, godina, akcija, javiGresku };
 
   return (
     <Okvir ja={ja}>
@@ -140,7 +160,14 @@ export default function Odsustvo() {
 
       {poruka && (
         <div role={poruka.tip === 'greska' ? 'alert' : 'status'} className={`mb-5 p-3 rounded-xl border text-sm font-medium flex justify-between gap-4 ${poruka.tip === 'greska' ? 'bg-red-50 border-red-200 text-red-800' : 'bg-green-50 border-green-200 text-green-900'}`}>
-          <span>{poruka.tekst}</span>
+          <div>
+            <p>{poruka.tekst}</p>
+            {poruka.upozorenja?.length > 0 && (
+              <ul className="mt-2 space-y-1 text-amber-900 list-disc pl-5">
+                {poruka.upozorenja.map((u) => <li key={u}>{u}</li>)}
+              </ul>
+            )}
+          </div>
           <button onClick={() => setPoruka(null)} className="font-bold opacity-70 hover:opacity-100" aria-label="Zatvori poruku">✕</button>
         </div>
       )}
@@ -176,7 +203,7 @@ function Okvir({ ja, children }) {
 
 // ================= Moji slobodni dani =================
 
-function MojiDani({ ja, praznici, odsustva, profili, korekcije, danas, godina, akcija }) {
+function MojiDani({ ja, praznici, odsustva, profili, korekcije, danas, godina, akcija, javiGresku }) {
   const mojProfil = profili.find((p) => p.id === ja.user.id) || {};
   const slava = mojProfil.slava_datum || null;
   const moja = odsustva.filter((o) => o.korisnik_id === ja.user.id);
@@ -280,7 +307,7 @@ function MojiDani({ ja, praznici, odsustva, profili, korekcije, danas, godina, a
 
       <section aria-labelledby="naslov-moji" className="bg-white border border-slate-200 rounded-2xl p-5">
         <h2 id="naslov-moji" className="text-base font-bold text-slate-900 mb-3">Moji zahtjevi</h2>
-        <ListaZahtjeva zahtjevi={moja} akcija={akcija} mojId={ja.user.id} mozeOtkazatiOdobreno={ja.dozvole.includes('odsustvo_odobravanje')} prazno="Još nemaš nijedan zahtjev." />
+        <ListaZahtjeva zahtjevi={moja} akcija={akcija} javiGresku={javiGresku} mojId={ja.user.id} mozeOtkazatiOdobreno={ja.dozvole.includes('odsustvo_odobravanje')} prazno="Još nemaš nijedan zahtjev." />
       </section>
     </div>
   );
@@ -477,8 +504,16 @@ function SlavaPolje({ profil, akcija, korisnikId, jeAdmin = false }) {
 
 // ================= Lista zahtjeva =================
 
-function ListaZahtjeva({ zahtjevi, akcija, mojId, mozeOtkazatiOdobreno, prazno, saImenom = false }) {
+function ListaZahtjeva({ zahtjevi, akcija, javiGresku, mojId, mozeOtkazatiOdobreno, prazno, saImenom = false }) {
   const [radi, setRadi] = useState(null);
+  const [preuzimam, setPreuzimam] = useState(null);
+
+  const pdf = async (z) => {
+    setPreuzimam(z.id);
+    const greskaPdf = await preuzmiRjesenje(z.id);
+    setPreuzimam(null);
+    if (greskaPdf) javiGresku?.(greskaPdf);
+  };
   if (zahtjevi.length === 0) return <p className="text-sm text-slate-600">{prazno}</p>;
 
   const otkazi = async (z) => {
@@ -517,7 +552,12 @@ function ListaZahtjeva({ zahtjevi, akcija, mojId, mozeOtkazatiOdobreno, prazno, 
                   {z.komentar && <span className="block text-xs text-slate-600">„{z.komentar}“</span>}
                   {z.napomena && <span className="block text-xs text-slate-600">Napomena: {z.napomena}</span>}
                 </td>
-                <td className="py-2.5 text-right">
+                <td className="py-2.5 text-right whitespace-nowrap space-x-3">
+                  {z.status === 'odobreno' && z.tip === 'godisnji' && (
+                    <button onClick={() => pdf(z)} disabled={preuzimam === z.id} className="text-sm font-semibold text-blue-700 hover:underline disabled:opacity-50">
+                      {preuzimam === z.id ? 'Preuzimanje…' : 'Rješenje (PDF)'}
+                    </button>
+                  )}
                   {mozeOtkazati && (
                     <button onClick={() => otkazi(z)} disabled={radi === z.id} className="text-sm font-semibold text-red-700 hover:underline disabled:opacity-50">
                       {radi === z.id ? 'Otkazivanje…' : 'Otkaži'}
@@ -536,6 +576,7 @@ function ListaZahtjeva({ zahtjevi, akcija, mojId, mozeOtkazatiOdobreno, prazno, 
 // ================= Odobravanje =================
 
 function Odobravanje({ ja, praznici, odsustva, profili, korekcije, danas, godina, akcija }) {
+  const jeAdmin = ja.dozvole.includes('admin');
   const naCekanju = odsustva.filter((o) => o.status === 'na_cekanju').sort((a, b) => (a.created_at < b.created_at ? -1 : 1));
   const [komentari, setKomentari] = useState({});
   const [radi, setRadi] = useState(null);
@@ -583,6 +624,12 @@ function Odobravanje({ ja, praznici, odsustva, profili, korekcije, danas, godina
               </div>
             </div>
 
+            {z.tip === 'godisnji' && (!profil.ime_prezime || !profil.radno_mjesto) && (
+              <p className="mt-3 text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                Za rješenje nedostaje {!profil.ime_prezime ? 'ime i prezime' : 'radno mjesto'}.{' '}
+                {jeAdmin ? 'Upiši ga u "Svi korisnici" → Detalji prije odobravanja.' : 'Javi administratoru da ga upiše.'}
+              </p>
+            )}
             {istovremeno.length > 0 && (
               <p className="mt-3 text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                 U istom periodu odsutni: {istovremeno.map((o) => `${o.korisnik_ime} (${STATUSI[o.status].toLowerCase()})`).join(', ')}
@@ -616,7 +663,7 @@ function Odobravanje({ ja, praznici, odsustva, profili, korekcije, danas, godina
 
 // ================= Svi korisnici =================
 
-function SviKorisnici({ ja, praznici, odsustva, profili, korekcije, danas, godina, akcija }) {
+function SviKorisnici({ ja, praznici, odsustva, profili, korekcije, danas, godina, akcija, javiGresku }) {
   const [otvoren, setOtvoren] = useState(null);
   const [pretraga, setPretraga] = useState('');
   const jeAdmin = ja.dozvole.includes('admin');
@@ -663,6 +710,7 @@ function SviKorisnici({ ja, praznici, odsustva, profili, korekcije, danas, godin
                 <tr>
                   <td className="py-2.5 pr-4">
                     <span className="font-semibold text-slate-900">{ime}</span>
+                    {p.ime_prezime && <span className="block text-xs text-slate-600">{p.ime_prezime}</span>}
                     {sada && <span className="ml-2 text-xs font-semibold text-green-900 bg-green-100 px-2 py-0.5 rounded-full">danas odsutan</span>}
                   </td>
                   <td className="py-2.5 pr-4 text-right tabular-nums">{stanje.prenosPreostalo}</td>
@@ -678,9 +726,10 @@ function SviKorisnici({ ja, praznici, odsustva, profili, korekcije, danas, godin
                 {otvoren === p.id && (
                   <tr>
                     <td colSpan={6} className="bg-slate-50 px-4 py-4">
-                      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_260px] gap-6">
-                        <ListaZahtjeva zahtjevi={njegova} akcija={akcija} mojId={ja.user.id} mozeOtkazatiOdobreno={jeOdobravac} prazno="Nema zahtjeva." />
+                      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_300px] gap-6">
+                        <ListaZahtjeva zahtjevi={njegova} akcija={akcija} javiGresku={javiGresku} mojId={ja.user.id} mozeOtkazatiOdobreno={jeOdobravac} prazno="Nema zahtjeva." />
                         <div className="space-y-5">
+                          {jeAdmin && <PodaciForma profil={p} akcija={akcija} />}
                           <SlavaPolje profil={p} akcija={akcija} korisnikId={p.id} jeAdmin={jeAdmin} />
                           {jeAdmin && <KorekcijaForma korisnikId={p.id} godina={godina} postojeca={korekcije.find((k) => k.korisnik_id === p.id && k.godina === godina)} akcija={akcija} />}
                         </div>
@@ -727,6 +776,56 @@ function KorekcijaForma({ korisnikId, godina, postojeca, akcija }) {
         </div>
       </div>
       <button type="submit" disabled={slanje} className="px-3 py-1.5 rounded-lg text-sm font-bold bg-slate-800 hover:bg-slate-900 text-white disabled:bg-slate-300">{slanje ? 'Čuvanje…' : 'Sačuvaj korekciju'}</button>
+    </form>
+  );
+}
+
+function PodaciForma({ profil, akcija }) {
+  const [imePrezime, setImePrezime] = useState(profil.ime_prezime || '');
+  const [radnoMjesto, setRadnoMjesto] = useState(profil.radno_mjesto || '');
+  const [pol, setPol] = useState(profil.pol || '');
+  const [radniOdnos, setRadniOdnos] = useState(profil.radni_odnos || 'neodređeno');
+  const [slanje, setSlanje] = useState(false);
+  const id = profil.id;
+  const polje = 'w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm bg-white';
+
+  const posalji = async (e) => {
+    e.preventDefault();
+    setSlanje(true);
+    await akcija({ akcija: 'podaci', korisnikId: id, imePrezime, radnoMjesto, pol, radniOdnos }, 'Podaci za rješenje su sačuvani.');
+    setSlanje(false);
+  };
+
+  return (
+    <form onSubmit={posalji} className="space-y-2">
+      <p className="text-xs font-bold text-slate-600">Podaci za rješenje</p>
+      <div>
+        <label htmlFor={`ime-${id}`} className="block text-xs text-slate-700 mb-1">Ime i prezime</label>
+        <input id={`ime-${id}`} value={imePrezime} onChange={(e) => setImePrezime(e.target.value)} placeholder="npr. Marko Marković" className={polje} />
+      </div>
+      <div>
+        <label htmlFor={`rm-${id}`} className="block text-xs text-slate-700 mb-1">Radno mjesto</label>
+        <input id={`rm-${id}`} value={radnoMjesto} onChange={(e) => setRadnoMjesto(e.target.value)} className={polje} />
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label htmlFor={`pol-${id}`} className="block text-xs text-slate-700 mb-1">Pol</label>
+          <select id={`pol-${id}`} value={pol} onChange={(e) => setPol(e.target.value)} className={polje}>
+            <option value="">—</option>
+            <option value="M">Muški</option>
+            <option value="Ž">Ženski</option>
+          </select>
+        </div>
+        <div>
+          <label htmlFor={`odnos-${id}`} className="block text-xs text-slate-700 mb-1">Radni odnos</label>
+          <select id={`odnos-${id}`} value={radniOdnos} onChange={(e) => setRadniOdnos(e.target.value)} className={polje}>
+            <option value="neodređeno">Neodređeno</option>
+            <option value="određeno">Određeno</option>
+          </select>
+        </div>
+      </div>
+      <p className="text-xs text-slate-600">JMBG se ne čuva u aplikaciji; upisuje se ručno na odštampano rješenje.</p>
+      <button type="submit" disabled={slanje} className="px-3 py-1.5 rounded-lg text-sm font-bold bg-slate-800 hover:bg-slate-900 text-white disabled:bg-slate-300">{slanje ? 'Čuvanje…' : 'Sačuvaj podatke'}</button>
     </form>
   );
 }

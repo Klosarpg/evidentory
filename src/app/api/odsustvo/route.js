@@ -4,6 +4,9 @@ import {
   TIPOVI, MAKS_DANA_ZAHTJEVA, danasUCrnojGori, jeIspravanDatum, razlikaDana,
   radniDani, provjeriKvotu, seKlapaju, formatirajDatum,
 } from '@/lib/odsustvo';
+import {
+  adresaAplikacije, obavijestiNoviZahtjev, obavijestiObradjen, obavijestiOtkazanOdobren, pripremiRjesenje,
+} from '@/lib/obavjestenja';
 
 // POST /api/odsustvo  { akcija, ... }
 //   zahtjev    { tip, datumOd, datumDo, napomena }      dozvola: odsustvo_zahtjev
@@ -12,6 +15,10 @@ import {
 //   odbij      { id, komentar }                         dozvola: odsustvo_odobravanje
 //   slava      { slavaDatum, slavaNaziv, korisnikId? }  sam jednom; admin bilo kad i bilo kome
 //   korekcija  { korisnikId, godina, dana, prenos, napomena }  dozvola: admin
+//   podaci     { korisnikId, imePrezime, radnoMjesto, pol, radniOdnos }  dozvola: admin (podaci za rješenje)
+// GET /api/odsustvo?rjesenje=ID  → PDF rješenja (vlasnik, odobravač, pregled svih ili prima dokument)
+//
+// Odgovor može imati "upozorenja": akcija je uspjela, ali npr. email nije poslat.
 
 const imeIz = (email) => (email || '').split('@')[0];
 
@@ -34,7 +41,7 @@ async function ucitajKontekst(supabase, korisnikId) {
 
 function porukaZaBazu(e) {
   const m = e?.message || String(e);
-  if (/odsustva|praznici|korekcije|slava_datum/.test(m) && /(does not exist|schema cache|not find)/i.test(m)) {
+  if (/odsustva|praznici|korekcije|slava_datum|ime_prezime|radno_mjesto|broj_rjesenja/.test(m) && /(does not exist|schema cache|not find)/i.test(m)) {
     return 'Tabele za slobodne dane ne postoje. Pokreni SQL "odsustvo.sql" u Supabase-u.';
   }
   return null;
@@ -47,14 +54,16 @@ export async function POST(request) {
   const ja = { id: korisnik.id, ime: imeIz(korisnik.email) };
 
   const tijelo = await request.json().catch(() => ({}));
+  const adresa = adresaAplikacije(request);
   try {
     switch (tijelo.akcija) {
-      case 'zahtjev': return await noviZahtjev(supabase, ja, dozvole, tijelo);
+      case 'zahtjev': return await noviZahtjev(supabase, ja, dozvole, tijelo, adresa);
       case 'otkazi': return await otkazi(supabase, ja, dozvole, tijelo);
       case 'odobri':
-      case 'odbij': return await obradi(supabase, ja, dozvole, tijelo);
+      case 'odbij': return await obradi(supabase, ja, dozvole, tijelo, adresa);
       case 'slava': return await postaviSlavu(supabase, ja, dozvole, tijelo);
       case 'korekcija': return await postaviKorekciju(supabase, dozvole, tijelo);
+      case 'podaci': return await postaviPodatke(supabase, dozvole, tijelo);
       default: return greska('Nepoznata akcija.');
     }
   } catch (e) {
@@ -63,7 +72,7 @@ export async function POST(request) {
   }
 }
 
-async function noviZahtjev(supabase, ja, dozvole, t) {
+async function noviZahtjev(supabase, ja, dozvole, t, adresa) {
   if (!dozvole.includes('odsustvo_zahtjev')) return greska('Tvoja uloga nema pravo da podnosi zahtjeve.', 403);
 
   const tip = t.tip;
@@ -108,8 +117,8 @@ async function noviZahtjev(supabase, ja, dozvole, t) {
   }).select().single();
   if (error) throw error;
 
-  // Faza 4: ovdje se šalje email odobravačima.
-  return NextResponse.json({ success: true, zahtjev: data });
+  const upozorenja = await obavijestiNoviZahtjev(supabase, data, adresa);
+  return NextResponse.json({ success: true, zahtjev: data, upozorenja });
 }
 
 async function ucitajZahtjev(supabase, id) {
@@ -131,17 +140,19 @@ async function otkazi(supabase, ja, dozvole, t) {
   }
   if (!['na_cekanju', 'odobreno'].includes(z.status)) return greska('Ovaj zahtjev je već zatvoren.');
 
-  const { error } = await supabase.from('odsustva').update({
+  const { data: azuriran, error } = await supabase.from('odsustva').update({
     status: 'otkazano',
     obradio_id: ja.id,
     obradio_ime: ja.ime,
     obradjeno_at: new Date().toISOString(),
-  }).eq('id', z.id).in('status', ['na_cekanju', 'odobreno']);
+  }).eq('id', z.id).in('status', ['na_cekanju', 'odobreno']).select().single();
   if (error) throw error;
-  return NextResponse.json({ success: true });
+
+  const upozorenja = z.status === 'odobreno' ? await obavijestiOtkazanOdobren(supabase, azuriran) : [];
+  return NextResponse.json({ success: true, upozorenja });
 }
 
-async function obradi(supabase, ja, dozvole, t) {
+async function obradi(supabase, ja, dozvole, t, adresa) {
   if (!dozvole.includes('odsustvo_odobravanje')) return greska('Nemaš dozvolu za odobravanje.', 403);
   const z = await ucitajZahtjev(supabase, t.id);
   if (!z) return greska('Zahtjev nije pronađen.', 404);
@@ -169,8 +180,26 @@ async function obradi(supabase, ja, dozvole, t) {
   if (error) throw error;
   if (!data?.length) return greska('Zahtjev je u međuvremenu obradio neko drugi. Osvježi stranicu.');
 
-  // Faza 4: ovdje ide email korisniku i, ako je odobreno, PDF dokument.
-  return NextResponse.json({ success: true });
+  let obradjen = data[0];
+  const upozorenja = [];
+  let rjesenje = null;
+  if (odobri && obradjen.tip === 'godisnji') {
+    try {
+      rjesenje = await pripremiRjesenje(supabase, obradjen, danasUCrnojGori());
+      const { data: saBrojem } = await supabase.from('odsustva')
+        .update({ broj_rjesenja: rjesenje.broj, datum_rjesenja: rjesenje.datum })
+        .eq('id', obradjen.id).select().single();
+      if (saBrojem) obradjen = saBrojem;
+      if (rjesenje.nedostajuPodaci) {
+        upozorenja.push(`Za ${obradjen.korisnik_ime} nisu upisani ime i prezime ili radno mjesto, pa rješenje ima prazna mjesta. Upiši ih u "Svi korisnici" → Detalji.`);
+      }
+    } catch (e) {
+      console.error('Rješenje nije napravljeno:', e);
+      upozorenja.push(`Zahtjev je odobren, ali rješenje nije napravljeno: ${e.message}`);
+    }
+  }
+  upozorenja.push(...await obavijestiObradjen(supabase, obradjen, adresa, { rjesenje }));
+  return NextResponse.json({ success: true, upozorenja });
 }
 
 async function postaviSlavu(supabase, ja, dozvole, t) {
@@ -210,4 +239,52 @@ async function postaviKorekciju(supabase, dozvole, t) {
   );
   if (error) throw error;
   return NextResponse.json({ success: true });
+}
+
+async function postaviPodatke(supabase, dozvole, t) {
+  if (!dozvole.includes('admin')) return greska('Podatke za rješenje može upisati samo administrator.', 403);
+  const korisnikId = String(t.korisnikId || '');
+  if (!korisnikId) return greska('Izaberi korisnika.');
+  const pol = ['M', 'Ž'].includes(t.pol) ? t.pol : null;
+  const radniOdnos = ['neodređeno', 'određeno'].includes(t.radniOdnos) ? t.radniOdnos : 'neodređeno';
+  const { error } = await supabase.from('profili').update({
+    ime_prezime: String(t.imePrezime || '').trim().slice(0, 100) || null,
+    radno_mjesto: String(t.radnoMjesto || '').trim().slice(0, 200) || null,
+    pol,
+    radni_odnos: radniOdnos,
+  }).eq('id', korisnikId);
+  if (error) throw error;
+  return NextResponse.json({ success: true });
+}
+
+// GET /api/odsustvo?rjesenje=ID → PDF rješenja
+export async function GET(request) {
+  const prijava = await provjeriPrijavu(request);
+  if (prijava.odgovor) return prijava.odgovor;
+  const { supabase, korisnik, dozvole } = prijava;
+
+  const id = new URL(request.url).searchParams.get('rjesenje');
+  try {
+    const z = await ucitajZahtjev(supabase, id);
+    if (!z) return greska('Zahtjev nije pronađen.', 404);
+    const smije = z.korisnik_id === korisnik.id
+      || ['odsustvo_odobravanje', 'odsustvo_pregled_svih', 'odsustvo_dokument'].some((d) => dozvole.includes(d));
+    if (!smije) return greska('Nemaš pristup ovom rješenju.', 403);
+    if (z.status !== 'odobreno' || z.tip !== 'godisnji') return greska('Rješenje postoji samo za odobren godišnji odmor.');
+
+    const datum = z.datum_rjesenja || (z.obradjeno_at ? z.obradjeno_at.slice(0, 10) : danasUCrnojGori());
+    const rjesenje = await pripremiRjesenje(supabase, z, datum);
+    if (!z.broj_rjesenja) {
+      await supabase.from('odsustva').update({ broj_rjesenja: rjesenje.broj, datum_rjesenja: rjesenje.datum }).eq('id', z.id);
+    }
+    return new NextResponse(rjesenje.pdf, {
+      headers: {
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="${rjesenje.naziv}"`,
+      },
+    });
+  } catch (e) {
+    console.error('Rješenje, greška:', e);
+    return greska(porukaZaBazu(e) || `Rješenje nije napravljeno: ${e.message}`, 500);
+  }
 }
