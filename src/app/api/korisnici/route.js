@@ -150,6 +150,11 @@ export async function PATCH(request) {
       .update({ korisnik: novoIme, korisnik_id: id })
       .is('korisnik_id', null)
       .eq('korisnik', staroIme);
+    // Ime i u zahtjevima za slobodne dane (ako tabela postoji).
+    const { error: odsustvaGreska } = await supabase.from('odsustva').update({ korisnik_ime: novoIme }).eq('korisnik_id', id);
+    if (odsustvaGreska && !/(does not exist|schema cache|not find)/i.test(odsustvaGreska.message)) {
+      console.error('Ime u zahtjevima za odsustvo nije ažurirano:', odsustvaGreska.message);
+    }
     const greskaIstorije = istorijaGreska || stariGreska;
     if (greskaIstorije) {
       console.error('Istorija nije ažurirana:', greskaIstorije.message);

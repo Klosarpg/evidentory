@@ -65,6 +65,7 @@ export default function Dashboard() {
   const [uloga, setUloga] = useState(''); 
   const [dozvole, setDozvole] = useState([]);
   const [uloge, setUloge] = useState([]);
+  const [ulogeGreskaPoruka, setUlogeGreskaPoruka] = useState('');
   const [novaUlogaNaziv, setNovaUlogaNaziv] = useState('');
   const [noviKorisnikKontakt, setNoviKorisnikKontakt] = useState('');
   const [urediKorisnikKontakt, setUrediKorisnikKontakt] = useState('');
@@ -140,6 +141,7 @@ export default function Dashboard() {
         if (sviProfili) setProfili(sviProfili);
         const { data: sveUloge, error: ulogeGreska } = await supabase.from('uloge').select('*').order('naziv', { ascending: true });
         setUloge(ulogeGreska ? [] : (sveUloge || []));
+        setUlogeGreskaPoruka(ulogeGreska ? ulogeGreska.message : (sveUloge?.length ? '' : 'Tabela uloga je prazna ili joj aplikacija nema pristup (grant select).'));
       }
 
       const { data: komitentiData } = await supabase.from('komitenti').select('*').order('naziv', { ascending: true });
@@ -1745,7 +1747,7 @@ export default function Dashboard() {
                 <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-1">Uloge i dozvole</h3>
                 <p className="text-xs text-slate-600 mb-3">Čekiraj šta svaka uloga smije. Promjena važi odmah za sve korisnike sa tom ulogom.</p>
                 {uloge.length === 0 ? (
-                  <p className="text-xs text-slate-700 bg-amber-50 border border-amber-200 rounded-lg p-3">Tabela uloga još ne postoji. Pokreni SQL "uloge-dozvole.sql" u Supabase-u.</p>
+                  <p className="text-xs text-slate-700 bg-amber-50 border border-amber-200 rounded-lg p-3">Aplikacija ne može da pročita uloge. Pokreni SQL "uloge-dozvole.sql" u Supabase-u pa osvježi stranicu.{ulogeGreskaPoruka && <span className="block mt-1 font-mono text-[11px] text-slate-600">Detalj: {ulogeGreskaPoruka}</span>}</p>
                 ) : (
                   <>
                     <div className="border border-slate-200 rounded-xl overflow-x-auto">

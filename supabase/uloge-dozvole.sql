@@ -77,3 +77,8 @@ drop trigger if exists zastita_uloge on public.profili;
 create trigger zastita_uloge
   before update on public.profili
   for each row execute function public.zastiti_ulogu();
+
+-- 6) Dozvole za API (kod novijih projekata nove tabele nisu automatski dostupne) i osvježavanje API-ja.
+grant select on public.uloge to authenticated;
+grant select, insert, update, delete on public.uloge to service_role;
+notify pgrst, 'reload schema';

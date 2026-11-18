@@ -22,9 +22,9 @@ export async function dozvoleUloge(supabase, uloga) {
   return dozvoleStareUloge(uloga);
 }
 
-// Vraća { supabase, adminId, adminUloga } ako je pošiljalac prijavljen i ima dozvolu,
-// inače { odgovor } sa greškom.
-export async function provjeriDozvolu(request, dozvola = 'admin') {
+// Provjerava ko šalje zahtjev. Vraća { supabase, korisnik, profil, dozvole } ili { odgovor } sa greškom.
+// supabase je klijent sa service ključem (zaobilazi RLS) — koristi ga samo nakon provjere dozvola.
+export async function provjeriPrijavu(request) {
   if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
     return { odgovor: greska('Na serveru nije podešen SUPABASE_SERVICE_ROLE_KEY.', 500) };
   }
@@ -42,17 +42,24 @@ export async function provjeriDozvolu(request, dozvola = 'admin') {
     return { odgovor: greska(`Prijava nije potvrđena: ${error?.message || 'nepoznat korisnik'}. Odjavi se i prijavi ponovo.`, 401) };
   }
 
-  // 2) Uloga i dozvole se čitaju service role ključem.
+  // 2) Profil i dozvole se čitaju service role ključem.
   const supabase = adminKlijent();
   const { data: profil, error: profilGreska } = await supabase
-    .from('profili').select('uloga').eq('id', data.user.id).single();
+    .from('profili').select('*').eq('id', data.user.id).single();
   if (profilGreska) {
     console.error('Čitanje profila service ključem nije uspjelo:', profilGreska.message);
     return { odgovor: greska(`SUPABASE_SERVICE_ROLE_KEY nije ispravan ili nije iz ovog projekta (${profilGreska.message}).`, 500) };
   }
 
   const dozvole = await dozvoleUloge(supabase, profil?.uloga || 'Korisnik');
-  if (!dozvole.includes(dozvola)) return { odgovor: greska('Nemaš dozvolu za ovu akciju.', 403) };
+  return { supabase, korisnik: data.user, profil, dozvole };
+}
 
-  return { supabase, adminId: data.user.id, adminUloga: profil?.uloga };
+// Vraća { supabase, adminId, adminUloga, korisnik, profil, dozvole } ako pošiljalac ima dozvolu,
+// inače { odgovor } sa greškom.
+export async function provjeriDozvolu(request, dozvola = 'admin') {
+  const rezultat = await provjeriPrijavu(request);
+  if (rezultat.odgovor) return rezultat;
+  if (!rezultat.dozvole.includes(dozvola)) return { odgovor: greska('Nemaš dozvolu za ovu akciju.', 403) };
+  return { ...rezultat, adminId: rezultat.korisnik.id, adminUloga: rezultat.profil?.uloga };
 }
