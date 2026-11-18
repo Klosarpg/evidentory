@@ -1,20 +1,14 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { provjeriDozvolu, greska } from '@/lib/serverAdmin';
 
-// Upravljanje korisnicima iz Kontrolnog panela (samo Admin), bez slanja emailova.
+// Upravljanje korisnicima iz Kontrolnog panela (dozvola "admin"), bez slanja emailova.
 // Korisnik se prijavljuje korisničkim imenom; u Supabase-u nalog ima adresu "ime@evidentory.com".
+// Pravi email za obavještenja čuva se posebno, u profili.kontakt_email.
 
 const DOMEN = 'evidentory.com';
-const DOZVOLJENE_ULOGE = ['Korisnik', 'Korisnik sa pravom povlacenja', 'Admin'];
 const MIN_LOZINKA = 6;
-
-function adminKlijent() {
-  return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-}
-
 const IME_REGEX = /^[a-z0-9._-]{3,30}$/;
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PORUKA_IME = 'Korisničko ime: 3–30 znakova, samo slova bez kvačica, brojevi, tačka, crtica i donja crta.';
 
 function jeZauzeto(error) {
@@ -22,54 +16,35 @@ function jeZauzeto(error) {
   return m.includes('already') || m.includes('registered') || m.includes('exists');
 }
 
-function greska(poruka, status = 400) {
-  return NextResponse.json({ error: poruka }, { status });
+// Prazan string = bez emaila; inače mora biti ispravna adresa.
+function ocistiKontaktEmail(vrijednost) {
+  const email = String(vrijednost || '').trim().toLowerCase();
+  if (!email) return { email: null };
+  if (!EMAIL_REGEX.test(email)) return { problem: 'Email za obavještenja nije ispravan.' };
+  return { email };
 }
 
-// Vraća admin klijent ako je pošiljalac prijavljeni Admin, inače odgovor sa greškom.
-async function provjeriAdmina(request) {
-  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    return { odgovor: greska('Na serveru nije podešen SUPABASE_SERVICE_ROLE_KEY.', 500) };
-  }
-
-  // 1) Prijavu provjeravamo istim (anon) ključem koji koristi i aplikacija.
-  const token = (request.headers.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
-  if (!token) return { odgovor: greska('Nisi prijavljen (sesija nije poslata). Osvježi stranicu i probaj ponovo.', 401) };
-
-  const obican = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  const { data, error } = await obican.auth.getUser(token);
-  if (error || !data?.user) {
-    console.error('Provjera prijave nije uspjela:', error?.message);
-    return { odgovor: greska(`Prijava nije potvrđena: ${error?.message || 'nepoznat korisnik'}. Odjavi se i prijavi ponovo.`, 401) };
-  }
-
-  // 2) Uloga se čita service role ključem. Ako ovdje pukne, ključ nije ispravan.
-  const supabase = adminKlijent();
-  const { data: profil, error: profilGreska } = await supabase
-    .from('profili').select('uloga').eq('id', data.user.id).single();
-  if (profilGreska) {
-    console.error('Čitanje profila service ključem nije uspjelo:', profilGreska.message);
-    return { odgovor: greska(`SUPABASE_SERVICE_ROLE_KEY nije ispravan ili nije iz ovog projekta (${profilGreska.message}).`, 500) };
-  }
-  if (profil?.uloga !== 'Admin') return { odgovor: greska('Samo administrator može upravljati korisnicima.', 403) };
-
-  return { supabase, adminId: data.user.id };
+async function postojiUloga(supabase, uloga) {
+  const { data, error } = await supabase.from('uloge').select('naziv').eq('naziv', uloga).maybeSingle();
+  if (error) return ['Korisnik', 'Korisnik sa pravom povlacenja', 'Admin'].includes(uloga); // SQL još nije pokrenut
+  return Boolean(data);
 }
 
-// POST /api/korisnici  { korisnickoIme, lozinka, uloga }  → kreira novi nalog
+// POST /api/korisnici  { korisnickoIme, lozinka, uloga, kontaktEmail? }  → kreira novi nalog
 export async function POST(request) {
-  const { supabase, odgovor } = await provjeriAdmina(request);
+  const { supabase, odgovor } = await provjeriDozvolu(request, 'admin');
   if (odgovor) return odgovor;
 
   const tijelo = await request.json().catch(() => ({}));
   const ime = String(tijelo.korisnickoIme || '').trim().toLowerCase();
   const lozinka = String(tijelo.lozinka || '');
-  const uloga = DOZVOLJENE_ULOGE.includes(tijelo.uloga) ? tijelo.uloga : 'Korisnik';
+  const uloga = String(tijelo.uloga || 'Korisnik');
+  const kontakt = ocistiKontaktEmail(tijelo.kontaktEmail);
 
   if (!IME_REGEX.test(ime)) return greska(PORUKA_IME);
   if (lozinka.length < MIN_LOZINKA) return greska(`Lozinka mora imati najmanje ${MIN_LOZINKA} znakova.`);
+  if (kontakt.problem) return greska(kontakt.problem);
+  if (!(await postojiUloga(supabase, uloga))) return greska(`Uloga "${uloga}" ne postoji.`);
 
   const email = `${ime}@${DOMEN}`;
   const { data, error } = await supabase.auth.admin.createUser({
@@ -85,20 +60,26 @@ export async function POST(request) {
     return greska('Korisnik nije kreiran. Pokušaj ponovo.', 500);
   }
 
-  const { error: profilGreska } = await supabase
-    .from('profili')
-    .upsert({ id: data.user.id, email, uloga }, { onConflict: 'id' });
+  const red = { id: data.user.id, email, uloga };
+  if (kontakt.email) red.kontakt_email = kontakt.email;
+  const { error: profilGreska } = await supabase.from('profili').upsert(red, { onConflict: 'id' });
   if (profilGreska) {
     console.error('Profil nije upisan:', profilGreska.message);
-    return greska('Nalog je kreiran, ali uloga nije upisana. Postavi je u listi korisnika.', 500);
+    const kolonaFali = profilGreska.message.includes('kontakt_email');
+    return greska(
+      kolonaFali
+        ? 'Nalog je kreiran, ali email nije sačuvan: pokreni SQL "uloge-dozvole.sql" pa uredi korisnika.'
+        : 'Nalog je kreiran, ali uloga nije upisana. Postavi je u listi korisnika.',
+      500
+    );
   }
 
   return NextResponse.json({ success: true });
 }
 
-// PATCH /api/korisnici  { id, korisnickoIme?, lozinka? }  → mijenja korisničko ime i/ili lozinku
+// PATCH /api/korisnici  { id, korisnickoIme?, lozinka?, kontaktEmail? }  → mijenja ime, lozinku i/ili email
 export async function PATCH(request) {
-  const { supabase, odgovor } = await provjeriAdmina(request);
+  const { supabase, odgovor } = await provjeriDozvolu(request, 'admin');
   if (odgovor) return odgovor;
 
   const tijelo = await request.json().catch(() => ({}));
@@ -118,6 +99,11 @@ export async function PATCH(request) {
     if (lozinka.length < MIN_LOZINKA) return greska(`Lozinka mora imati najmanje ${MIN_LOZINKA} znakova.`);
     izmjene.password = lozinka;
   }
+  let kontakt = null;
+  if (tijelo.kontaktEmail !== undefined) {
+    kontakt = ocistiKontaktEmail(tijelo.kontaktEmail);
+    if (kontakt.problem) return greska(kontakt.problem);
+  }
 
   const { data: postojeci, error: citanjeGreska } = await supabase.auth.admin.getUserById(id);
   if (citanjeGreska || !postojeci?.user) return greska('Korisnik nije pronađen.', 404);
@@ -126,19 +112,34 @@ export async function PATCH(request) {
     izmjene.email = noviEmail;
     izmjene.email_confirm = true; // bez emaila za potvrdu
   }
-  if (Object.keys(izmjene).length === 0) return NextResponse.json({ success: true });
 
-  const { error } = await supabase.auth.admin.updateUserById(id, izmjene);
-  if (error) {
-    if (jeZauzeto(error)) return greska('To korisničko ime je već zauzeto.');
-    console.error('Izmjena korisnika nije uspjela:', error.message);
-    return greska('Izmjena nije sačuvana. Pokušaj ponovo.', 500);
+  if (Object.keys(izmjene).length > 0) {
+    const { error } = await supabase.auth.admin.updateUserById(id, izmjene);
+    if (error) {
+      if (jeZauzeto(error)) return greska('To korisničko ime je već zauzeto.');
+      console.error('Izmjena korisnika nije uspjela:', error.message);
+      return greska('Izmjena nije sačuvana. Pokušaj ponovo.', 500);
+    }
+  }
+
+  // Profil: novo korisničko ime i/ili email za obavještenja.
+  const profilIzmjene = {};
+  if (izmjene.email) profilIzmjene.email = izmjene.email;
+  if (kontakt) profilIzmjene.kontakt_email = kontakt.email;
+  if (Object.keys(profilIzmjene).length > 0) {
+    const { error: profilGreska } = await supabase.from('profili').update(profilIzmjene).eq('id', id);
+    if (profilGreska) {
+      console.error('Profil nije ažuriran:', profilGreska.message);
+      return greska(
+        profilGreska.message.includes('kontakt_email')
+          ? 'Email za obavještenja nije sačuvan: pokreni SQL "uloge-dozvole.sql".'
+          : 'Profil nije ažuriran. Pokušaj ponovo.',
+        500
+      );
+    }
   }
 
   if (izmjene.email) {
-    const { error: profilGreska } = await supabase.from('profili').update({ email: izmjene.email }).eq('id', id);
-    if (profilGreska) console.error('Email u profilu nije ažuriran:', profilGreska.message);
-
     // Novo ime upisujemo i u sve unose ovog korisnika u istoriji prometa.
     const staroIme = (postojeci.user.email || '').split('@')[0];
     const novoIme = izmjene.email.split('@')[0];
@@ -163,7 +164,7 @@ export async function PATCH(request) {
 
 // DELETE /api/korisnici  { id }  → briše nalog i profil
 export async function DELETE(request) {
-  const { supabase, adminId, odgovor } = await provjeriAdmina(request);
+  const { supabase, adminId, odgovor } = await provjeriDozvolu(request, 'admin');
   if (odgovor) return odgovor;
 
   const tijelo = await request.json().catch(() => ({}));

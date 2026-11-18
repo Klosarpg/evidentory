@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { ucitajMojeDozvole, DOZVOLE } from '@/lib/dozvole';
 import ExcelJS from 'exceljs';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -62,6 +63,11 @@ export default function Dashboard() {
   
   const [korisnikEmail, setKorisnikEmail] = useState(''); 
   const [uloga, setUloga] = useState(''); 
+  const [dozvole, setDozvole] = useState([]);
+  const [uloge, setUloge] = useState([]);
+  const [novaUlogaNaziv, setNovaUlogaNaziv] = useState('');
+  const [noviKorisnikKontakt, setNoviKorisnikKontakt] = useState('');
+  const [urediKorisnikKontakt, setUrediKorisnikKontakt] = useState('');
   const [noviKorisnikIme, setNoviKorisnikIme] = useState('');
   const [noviKorisnikLozinka, setNoviKorisnikLozinka] = useState('');
   const [noviKorisnikUloga, setNoviKorisnikUloga] = useState('Korisnik');
@@ -120,25 +126,20 @@ export default function Dashboard() {
 
   const inicijalizujAplikaciju = async () => {
     try {
-      const { data: { user }, error: authError } = await supabase.auth.getUser();
-      if (authError || !user) return router.push('/');
+      const ja = await ucitajMojeDozvole(supabase);
+      if (!ja) return router.push('/');
+      // Bez dozvole za pregled zaliha korisnik ide na početni ekran.
+      if (!ja.dozvole.includes('zalihe_pregled')) return router.replace('/pocetna');
 
-      const cistoIme = user.email.split('@')[0];
-      setKorisnikEmail(cistoIme);
+      setKorisnikEmail(ja.korisnickoIme);
+      setDozvole(ja.dozvole);
+      setUloga(ja.uloga);
 
-      const { data: profilData } = await supabase.from('profili').select('uloga').eq('id', user.id).single();
-      
-      let trenutnaUloga = 'Korisnik';
-      if (profilData && profilData.uloga) {
-        trenutnaUloga = profilData.uloga;
-        setUloga(profilData.uloga);
-      } else {
-        setUloga('Korisnik');
-      }
-
-      if (trenutnaUloga === 'Admin') {
+      if (ja.dozvole.includes('admin')) {
         const { data: sviProfili } = await supabase.from('profili').select('*').order('email', { ascending: true });
         if (sviProfili) setProfili(sviProfili);
+        const { data: sveUloge, error: ulogeGreska } = await supabase.from('uloge').select('*').order('naziv', { ascending: true });
+        setUloge(ulogeGreska ? [] : (sveUloge || []));
       }
 
       const { data: komitentiData } = await supabase.from('komitenti').select('*').order('naziv', { ascending: true });
@@ -168,8 +169,10 @@ export default function Dashboard() {
     router.push('/');
   };
 
-  const mozeDaPovlaciIUnosi = uloga === 'Admin' || uloga === 'Korisnik sa pravom povlacenja';
-  const jeLiAdmin = uloga === 'Admin';
+  const mozeDaPovlaciIUnosi = dozvole.includes('zalihe_knjizenje');
+  const jeLiAdmin = dozvole.includes('admin');
+  // Uloge za padajuće liste; dok SQL za uloge nije pokrenut, prikazuju se stare tri.
+  const nazivUloga = uloge.length > 0 ? uloge.map(u => u.naziv) : ['Korisnik', 'Korisnik sa pravom povlacenja', 'Admin'];
 
   const dogodiSeIzmenaArtiklaUStavci = (index, opremaId) => {
     const noveStavke = [...stavkeOtpremnice];
@@ -318,15 +321,53 @@ export default function Dashboard() {
   };
 
   // Poziv serverske rute /api/korisnici (samo Admin). Nalozi se prave bez emaila.
-  const pozoviKorisnickiApi = async (metoda, tijelo) => {
+  const pozoviApi = async (adresa, metoda, tijelo) => {
     const { data: { session } } = await supabase.auth.getSession();
-    const odgovor = await fetch('/api/korisnici', {
+    const odgovor = await fetch(adresa, {
       method: metoda,
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token || ''}` },
       body: JSON.stringify(tijelo),
     });
     const rezultat = await odgovor.json().catch(() => ({}));
     return { ok: odgovor.ok, poruka: rezultat.error };
+  };
+  const pozoviKorisnickiApi = (metoda, tijelo) => pozoviApi('/api/korisnici', metoda, tijelo);
+
+  // ---- Uloge i dozvole ----
+  const promijeniDozvoluUloge = async (naziv, kljuc, ukljuceno) => {
+    const u = uloge.find(x => x.naziv === naziv);
+    if (!u) return;
+    const stare = u.dozvole || [];
+    const nove = ukljuceno ? [...new Set([...stare, kljuc])] : stare.filter(d => d !== kljuc);
+    setUloge(lista => lista.map(x => x.naziv === naziv ? { ...x, dozvole: nove } : x));
+    const { ok, poruka } = await pozoviApi('/api/uloge', 'PATCH', { naziv, dozvole: nove });
+    if (!ok) {
+      setUloge(lista => lista.map(x => x.naziv === naziv ? { ...x, dozvole: stare } : x));
+      return paziIPokreniObavestenje("Dozvola nije sačuvana", poruka || 'Došlo je do greške. Pokušaj ponovo.');
+    }
+    if (naziv === uloga) inicijalizujAplikaciju();
+  };
+
+  const dodajUlogu = async (e) => {
+    e.preventDefault();
+    const naziv = novaUlogaNaziv.trim();
+    const { ok, poruka } = await pozoviApi('/api/uloge', 'POST', { naziv, dozvole: ['zalihe_pregled', 'odsustvo_zahtjev'] });
+    if (!ok) return paziIPokreniObavestenje("Uloga nije dodata", poruka || 'Došlo je do greške. Pokušaj ponovo.');
+    setNovaUlogaNaziv('');
+    inicijalizujAplikaciju();
+  };
+
+  const obrisiUlogu = (naziv) => {
+    setPotvrdaModal({
+      naslov: "Obriši ulogu",
+      poruka: `Uloga "${naziv}" će biti obrisana. Moguće je samo ako je nijedan korisnik nema.`,
+      akcija: async () => {
+        setPotvrdaModal(null);
+        const { ok, poruka } = await pozoviApi('/api/uloge', 'DELETE', { naziv });
+        if (!ok) return paziIPokreniObavestenje("Uloga nije obrisana", poruka || 'Došlo je do greške. Pokušaj ponovo.');
+        inicijalizujAplikaciju();
+      },
+    });
   };
 
   const kreirajKorisnika = async (e) => {
@@ -335,12 +376,13 @@ export default function Dashboard() {
     setKorisnikSlanje(true);
     try {
       const ime = noviKorisnikIme.trim().toLowerCase();
-      const { ok, poruka } = await pozoviKorisnickiApi('POST', { korisnickoIme: ime, lozinka: noviKorisnikLozinka, uloga: noviKorisnikUloga });
+      const { ok, poruka } = await pozoviKorisnickiApi('POST', { korisnickoIme: ime, lozinka: noviKorisnikLozinka, uloga: noviKorisnikUloga, kontaktEmail: noviKorisnikKontakt });
       if (!ok) return paziIPokreniObavestenje("Korisnik nije kreiran", poruka || 'Došlo je do greške. Pokušaj ponovo.');
       paziIPokreniObavestenje("Korisnik je kreiran", `Korisnik "${ime}" se sada može prijaviti svojim korisničkim imenom i lozinkom.`);
       setNoviKorisnikIme('');
       setNoviKorisnikLozinka('');
       setNoviKorisnikUloga('Korisnik');
+      setNoviKorisnikKontakt('');
       inicijalizujAplikaciju();
     } finally {
       setKorisnikSlanje(false);
@@ -353,6 +395,7 @@ export default function Dashboard() {
     setUrediKorisnikId(p.id);
     setUrediKorisnikIme(korisnickoImeIz(p.email));
     setUrediKorisnikLozinka('');
+    setUrediKorisnikKontakt(p.kontakt_email || '');
   };
 
   const odustaniOdUredjivanja = () => {
@@ -371,6 +414,7 @@ export default function Dashboard() {
         id: urediKorisnikId,
         korisnickoIme: ime,
         lozinka: urediKorisnikLozinka || undefined,
+        kontaktEmail: urediKorisnikKontakt,
       });
       if (!ok) return paziIPokreniObavestenje("Izmjena nije sačuvana", poruka || 'Došlo je do greške. Pokušaj ponovo.');
       paziIPokreniObavestenje("Korisnik je izmijenjen", urediKorisnikLozinka
@@ -847,6 +891,10 @@ export default function Dashboard() {
           </div>
           
           <div className="flex-1 overflow-y-auto p-4 space-y-6 no-scrollbar">
+            <button onClick={() => router.push('/pocetna')} className="w-full flex items-center gap-2.5 px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:bg-slate-800/30 hover:text-white transition-all">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7"/></svg>
+              Početna
+            </button>
             {/* SEKCIJA: INVENTAR */}
             <div className="space-y-1">
               <p className="px-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Inventar</p>
@@ -1615,7 +1663,7 @@ export default function Dashboard() {
 
               <div className="border border-slate-200 rounded-2xl p-5 bg-white">
                 <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-3">Uloge i dozvole korisnika</h3>
-                <form onSubmit={kreirajKorisnika} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end bg-slate-50 p-3 rounded-xl border border-slate-200 mb-4">
+                <form onSubmit={kreirajKorisnika} className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end bg-slate-50 p-3 rounded-xl border border-slate-200 mb-4">
                   <div>
                     <label htmlFor="novi-ime" className="block text-[11px] font-bold text-slate-600 mb-1">Novi korisnik: korisničko ime *</label>
                     <input id="novi-ime" required minLength={3} maxLength={30} pattern="[A-Za-z0-9._\-]+" title="Slova bez kvačica, brojevi, tačka, crtica i donja crta" autoComplete="off" placeholder="npr. marko" value={noviKorisnikIme} onChange={e => setNoviKorisnikIme(e.target.value)} className="w-full border border-slate-200 p-2 rounded-lg text-xs bg-white outline-none focus:border-blue-500 font-semibold" />
@@ -1625,11 +1673,13 @@ export default function Dashboard() {
                     <input id="novi-lozinka" type="text" required minLength={6} autoComplete="off" value={noviKorisnikLozinka} onChange={e => setNoviKorisnikLozinka(e.target.value)} className="w-full border border-slate-200 p-2 rounded-lg text-xs bg-white outline-none focus:border-blue-500 font-semibold" />
                   </div>
                   <div>
+                    <label htmlFor="novi-kontakt" className="block text-[11px] font-bold text-slate-600 mb-1">Email za obavještenja</label>
+                    <input id="novi-kontakt" type="email" autoComplete="off" placeholder="ime@firma.com" value={noviKorisnikKontakt} onChange={e => setNoviKorisnikKontakt(e.target.value)} className="w-full border border-slate-200 p-2 rounded-lg text-xs bg-white outline-none focus:border-blue-500 font-semibold" />
+                  </div>
+                  <div>
                     <label htmlFor="novi-uloga" className="block text-[11px] font-bold text-slate-600 mb-1">Uloga</label>
                     <select id="novi-uloga" value={noviKorisnikUloga} onChange={e => setNoviKorisnikUloga(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg text-xs bg-white outline-none focus:border-blue-500 font-semibold text-slate-700">
-                      <option value="Korisnik">Korisnik (samo pregled)</option>
-                      <option value="Korisnik sa pravom povlacenja">Korisnik sa pravom povlačenja</option>
-                      <option value="Admin">Admin (sve dozvole)</option>
+                      {nazivUloga.map(n => <option key={n} value={n}>{n}</option>)}
                     </select>
                   </div>
                   <button type="submit" disabled={korisnikSlanje} className="w-full bg-blue-600 hover:bg-blue-700 text-white text-xs py-2 rounded-lg font-bold transition-all shadow-md disabled:bg-blue-400 disabled:cursor-wait">{korisnikSlanje ? 'Spremanje…' : 'Kreiraj korisnika'}</button>
@@ -1653,6 +1703,10 @@ export default function Dashboard() {
                                 <input id="uredi-ime" required minLength={3} maxLength={30} pattern="[A-Za-z0-9._\-]+" title="Slova bez kvačica, brojevi, tačka, crtica i donja crta" autoComplete="off" value={urediKorisnikIme} onChange={e => setUrediKorisnikIme(e.target.value)} className="w-full border border-slate-300 px-2 py-1.5 rounded-lg text-xs bg-white font-semibold text-slate-700 outline-none focus:border-blue-500" />
                               </div>
                               <div className="flex-1">
+                                <label htmlFor="uredi-kontakt" className="block text-[11px] font-bold text-slate-600 mb-1">Email za obavještenja</label>
+                                <input id="uredi-kontakt" type="email" autoComplete="off" placeholder="ime@firma.com" value={urediKorisnikKontakt} onChange={e => setUrediKorisnikKontakt(e.target.value)} className="w-full border border-slate-300 px-2 py-1.5 rounded-lg text-xs bg-white font-semibold text-slate-700 outline-none focus:border-blue-500" />
+                              </div>
+                              <div className="flex-1">
                                 <label htmlFor="uredi-lozinka" className="block text-[11px] font-bold text-slate-600 mb-1">Nova lozinka (prazno = ostaje ista)</label>
                                 <input id="uredi-lozinka" type="text" minLength={6} autoComplete="off" value={urediKorisnikLozinka} onChange={e => setUrediKorisnikLozinka(e.target.value)} className="w-full border border-slate-300 px-2 py-1.5 rounded-lg text-xs bg-white font-semibold text-slate-700 outline-none focus:border-blue-500" />
                               </div>
@@ -1665,12 +1719,13 @@ export default function Dashboard() {
                         </tr>
                       ) : (
                         <tr key={p.id} className="hover:bg-white transition-colors">
-                          <td className="px-4 py-3 font-medium text-slate-700">{korisnickoImeIz(p.email)}</td>
+                          <td className="px-4 py-3">
+                            <p className="font-medium text-slate-700">{korisnickoImeIz(p.email)}</p>
+                            <p className="text-xs text-slate-600">{p.kontakt_email || 'bez emaila za obavještenja'}</p>
+                          </td>
                           <td className="px-4 py-3 text-right">
                             <select aria-label={`Uloga korisnika ${korisnickoImeIz(p.email)}`} value={p.uloga} onChange={(e) => promijeniUloguKorisnika(p.id, e.target.value)} className="border border-slate-300 px-2 py-1.5 rounded-lg text-xs bg-white font-semibold text-slate-700 outline-none focus:border-blue-500">
-                              <option value="Korisnik">Korisnik (samo pregled)</option>
-                              <option value="Korisnik sa pravom povlacenja">Korisnik sa pravom povlačenja</option>
-                              <option value="Admin">Admin (sve dozvole)</option>
+                              {nazivUloga.map(n => <option key={n} value={n}>{n}</option>)}
                             </select>
                           </td>
                           <td className="px-4 py-3 text-right whitespace-nowrap space-x-3">
@@ -1684,6 +1739,63 @@ export default function Dashboard() {
                     </tbody>
                   </table>
                 </div>
+              </div>
+
+              <div className="border border-slate-200 rounded-2xl p-5 bg-white">
+                <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-1">Uloge i dozvole</h3>
+                <p className="text-xs text-slate-600 mb-3">Čekiraj šta svaka uloga smije. Promjena važi odmah za sve korisnike sa tom ulogom.</p>
+                {uloge.length === 0 ? (
+                  <p className="text-xs text-slate-700 bg-amber-50 border border-amber-200 rounded-lg p-3">Tabela uloga još ne postoji. Pokreni SQL "uloge-dozvole.sql" u Supabase-u.</p>
+                ) : (
+                  <>
+                    <div className="border border-slate-200 rounded-xl overflow-x-auto">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-slate-100 border-b border-slate-200">
+                          <tr>
+                            <th className="px-3 py-2 font-semibold text-slate-600">Uloga</th>
+                            {DOZVOLE.map(d => (
+                              <th key={d.kljuc} className="px-2 py-2 font-semibold text-slate-600 text-center align-bottom">
+                                <span className="block text-[10px] text-slate-500 font-medium">{d.grupa}</span>
+                                {d.naziv}
+                              </th>
+                            ))}
+                            <th className="px-3 py-2"><span className="sr-only">Akcije</span></th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-200 bg-white">
+                          {uloge.map(u => (
+                            <tr key={u.naziv}>
+                              <td className="px-3 py-2.5 font-semibold text-slate-800 whitespace-nowrap">{u.naziv}</td>
+                              {DOZVOLE.map(d => (
+                                <td key={d.kljuc} className="px-2 py-2.5 text-center">
+                                  <input
+                                    type="checkbox"
+                                    aria-label={`${u.naziv}: ${d.naziv}`}
+                                    checked={(u.dozvole || []).includes(d.kljuc)}
+                                    onChange={e => promijeniDozvoluUloge(u.naziv, d.kljuc, e.target.checked)}
+                                    className="w-4 h-4 accent-blue-600 cursor-pointer"
+                                  />
+                                </td>
+                              ))}
+                              <td className="px-3 py-2.5 text-right">
+                                {u.naziv !== uloga && (
+                                  <button type="button" onClick={() => obrisiUlogu(u.naziv)} className="text-red-600 hover:text-red-800 font-bold">Obriši</button>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <form onSubmit={dodajUlogu} className="flex flex-col sm:flex-row sm:items-end gap-3 mt-3">
+                      <div className="flex-1">
+                        <label htmlFor="nova-uloga" className="block text-[11px] font-bold text-slate-600 mb-1">Nova uloga (npr. Office manager, Direktor)</label>
+                        <input id="nova-uloga" required minLength={2} maxLength={50} value={novaUlogaNaziv} onChange={e => setNovaUlogaNaziv(e.target.value)} className="w-full border border-slate-200 p-2 rounded-lg text-xs bg-white outline-none focus:border-blue-500 font-semibold" />
+                      </div>
+                      <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-4 py-2 rounded-lg font-bold">Dodaj ulogu</button>
+                    </form>
+                  </>
+                )}
               </div>
 
               <div className="border border-slate-200 rounded-2xl p-5 bg-white">

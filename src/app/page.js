@@ -13,11 +13,11 @@ export default function Login() {
   const [provjera, setProvjera] = useState(true);
   const router = useRouter();
 
-  // Ako je korisnik već prijavljen, sesija je sačuvana u browseru, pa ide direktno na dashboard.
+  // Ako je korisnik već prijavljen, sesija je sačuvana u browseru, pa ide direktno na početni ekran.
   useEffect(() => {
 
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) router.replace('/dashboard');
+      if (session) router.replace('/pocetna');
       else setProvjera(false);
     });
   }, [router]);
@@ -38,7 +38,7 @@ export default function Login() {
       setGreska(prevediGresku(error));
       setLoading(false);
     } else {
-      router.push('/dashboard');
+      router.push('/pocetna');
     }
   };
 
