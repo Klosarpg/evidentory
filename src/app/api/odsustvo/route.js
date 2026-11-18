@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, after } from 'next/server';
 import { provjeriPrijavu, greska } from '@/lib/serverAdmin';
 import {
   TIPOVI, MAKS_DANA_ZAHTJEVA, danasUCrnojGori, jeIspravanDatum, razlikaDana,
@@ -24,6 +24,22 @@ import { jeIspravanJmbg, maskirajJmbg } from '@/lib/slikeFirme';
 // Odgovor može imati "upozorenja": akcija je uspjela, ali npr. email nije poslat.
 
 const imeIz = (email) => (email || '').split('@')[0];
+
+// Emailovi se šalju poslije odgovora; ovoliko sekundi smiju trajati (Vercel).
+export const maxDuration = 60;
+
+// Pokreće slanje emailova u pozadini, a odmah vraća upozorenja koja se znaju unaprijed.
+function uPozadini(obavjestenje, oznaka) {
+  after(async () => {
+    try {
+      const problemi = await obavjestenje.posalji();
+      if (problemi.length) console.warn(`${oznaka}: emailovi nisu svi poslati:`, problemi);
+    } catch (e) {
+      console.error(`${oznaka}: slanje emailova nije uspjelo:`, e);
+    }
+  });
+  return obavjestenje.upozorenja;
+}
 
 async function ucitajPraznike(supabase) {
   const { data, error } = await supabase.from('praznici').select('datum, naziv');
@@ -125,7 +141,7 @@ async function noviZahtjev(supabase, ja, dozvole, t, adresa) {
   }).select().single();
   if (error) throw error;
 
-  const upozorenja = await obavijestiNoviZahtjev(supabase, data, adresa);
+  const upozorenja = uPozadini(await obavijestiNoviZahtjev(supabase, data, adresa), 'Novi zahtjev');
   return NextResponse.json({ success: true, zahtjev: data, upozorenja });
 }
 
@@ -156,7 +172,7 @@ async function otkazi(supabase, ja, dozvole, t) {
   }).eq('id', z.id).in('status', ['na_cekanju', 'odobreno']).select().single();
   if (error) throw error;
 
-  const upozorenja = z.status === 'odobreno' ? await obavijestiOtkazanOdobren(supabase, azuriran) : [];
+  const upozorenja = z.status === 'odobreno' ? uPozadini(await obavijestiOtkazanOdobren(supabase, azuriran), 'Otkazivanje') : [];
   return NextResponse.json({ success: true, upozorenja });
 }
 
@@ -206,7 +222,7 @@ async function obradi(supabase, ja, dozvole, t, adresa) {
       upozorenja.push(`Zahtjev je odobren, ali rješenje nije napravljeno: ${e.message}`);
     }
   }
-  upozorenja.push(...await obavijestiObradjen(supabase, obradjen, adresa, { rjesenje }));
+  upozorenja.push(...uPozadini(await obavijestiObradjen(supabase, obradjen, adresa, { rjesenje }), odobri ? 'Odobravanje' : 'Odbijanje'));
   return NextResponse.json({ success: true, upozorenja });
 }
 

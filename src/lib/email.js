@@ -10,6 +10,8 @@ function dajTransporter() {
   if (!transporter) {
     transporter = nodemailer.createTransport({
       service: 'gmail',
+      pool: true, // jedna prijava na Gmail za više emailova
+      maxConnections: 3,
       auth: {
         user: process.env.GMAIL_USER,
         pass: process.env.GMAIL_APP_PASSWORD.replace(/\s+/g, ''), // Google prikazuje lozinku sa razmacima
@@ -53,6 +55,14 @@ export function tekstPoruke({ naslov, uvod, redovi = [], dugme, napomena }) {
   ].join('\n');
 }
 
+// Ako slanje nije podešeno, vraća poruku šta fali; inače null. Brza provjera, bez slanja.
+export function problemSaPodesavanjem() {
+  const fali = ['GMAIL_USER', 'GMAIL_APP_PASSWORD'].filter((k) => !process.env[k]);
+  return fali.length
+    ? `Server ne vidi ${fali.join(' i ')}. Provjeri .env.local (ili Vercel → Environment Variables) i restartuj server.`
+    : null;
+}
+
 // Vraća { ok, preskoceno?, greska? }. Nikad ne baca grešku: email ne smije oboriti glavnu akciju.
 export async function posaljiEmail({ prima, naslov, sadrzaj, prilozi = [] }) {
   const lista = [...new Set((Array.isArray(prima) ? prima : [prima]).filter(Boolean))];
@@ -68,22 +78,20 @@ export async function posaljiEmail({ prima, naslov, sadrzaj, prilozi = [] }) {
     };
   }
 
-  // Svakom primaocu posebno, da ne vide adrese jedni drugih.
-  const greske = [];
-  for (const adresa of lista) {
-    try {
-      await t.sendMail({
-        from: `"Evidentory" <${process.env.GMAIL_USER}>`,
-        to: adresa,
-        subject: naslov,
-        text: tekstPoruke(sadrzaj),
-        html: htmlPoruke(sadrzaj),
-        attachments: prilozi,
-      });
-    } catch (e) {
-      console.error(`Email za ${adresa} nije poslat:`, e.message);
-      greske.push(`${adresa}: ${e.message}`);
-    }
-  }
+  // Svakom primaocu posebno (da ne vide adrese jedni drugih), ali istovremeno.
+  const pocetak = Date.now();
+  const rezultati = await Promise.allSettled(lista.map((adresa) => t.sendMail({
+    from: `"Evidentory" <${process.env.GMAIL_USER}>`,
+    to: adresa,
+    subject: naslov,
+    text: tekstPoruke(sadrzaj),
+    html: htmlPoruke(sadrzaj),
+    attachments: prilozi,
+  })));
+  const greske = rezultati
+    .map((r, i) => (r.status === 'rejected' ? `${lista[i]}: ${r.reason?.message || r.reason}` : null))
+    .filter(Boolean);
+  greske.forEach((g) => console.error('Email nije poslat:', g));
+  console.log(`Email "${naslov}" → ${lista.length} primalac(a), ${Date.now() - pocetak} ms`);
   return greske.length ? { ok: false, greska: `Email nije poslat (${greske.join('; ')})` } : { ok: true };
 }

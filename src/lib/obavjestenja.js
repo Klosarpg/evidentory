@@ -1,9 +1,25 @@
-import { posaljiEmail } from '@/lib/email';
+import { posaljiEmail, problemSaPodesavanjem } from '@/lib/email';
 import { napraviRjesenje, nazivFajlaRjesenja } from '@/lib/rjesenje';
 import { TIPOVI, formatirajDatum, formatirajSlavu } from '@/lib/odsustvo';
 import { ucitajSlikeFirme, ucitajJmbg } from '@/lib/slikeFirme';
 
-// Ko dobija koji email za slobodne dane. Sve funkcije vraćaju listu upozorenja (prazna = sve poslato).
+// Ko dobija koji email za slobodne dane.
+// obavijesti* funkcije rade u dva koraka, da korisnik ne čeka Gmail:
+//   1) odmah: nađu primaoce i vrate { upozorenja, posalji }  (upozorenja = ono što se zna unaprijed)
+//   2) posalji() se zove poslije odgovora (after), šalje emailove i vraća upozorenja o slanju za log.
+
+function pripremi(upozorenja, poslovi) {
+  const problem = problemSaPodesavanjem();
+  if (problem && poslovi.length) upozorenja.push(problem);
+  return {
+    upozorenja,
+    posalji: async () => {
+      if (problem) return [];
+      const rezultati = await Promise.all(poslovi.map((p) => p()));
+      return rezultati.flat();
+    },
+  };
+}
 
 export function adresaAplikacije(request) {
   const izZahtjeva = request?.headers.get('origin');
@@ -47,9 +63,9 @@ const upozorenje = (rezultat, kome) => (rezultat.ok ? [] : [`${kome}: ${rezultat
 export async function obavijestiNoviZahtjev(supabase, zahtjev, adresa) {
   const prima = await emailoviSaDozvolom(supabase, 'odsustvo_odobravanje', zahtjev.korisnik_id);
   if (prima.length === 0) {
-    return ['Nema drugog odobravača sa upisanim emailom (podnosilac zahtjeva ne dobija obavještenje o sopstvenom zahtjevu), pa obavještenje nije poslato.'];
+    return pripremi(['Nema drugog odobravača sa upisanim emailom (podnosilac zahtjeva ne dobija obavještenje o sopstvenom zahtjevu), pa obavještenje nije poslato.'], []);
   }
-  const r = await posaljiEmail({
+  return pripremi([], [async () => upozorenje(await posaljiEmail({
     prima,
     naslov: `Novi zahtjev za slobodne dane: ${zahtjev.korisnik_ime}`,
     sadrzaj: {
@@ -58,13 +74,13 @@ export async function obavijestiNoviZahtjev(supabase, zahtjev, adresa) {
       redovi: detalji(zahtjev),
       dugme: { tekst: 'Otvori zahtjeve na odobravanju', adresa: `${adresa}/odsustvo` },
     },
-  });
-  return upozorenje(r, 'Odobravači');
+  }), 'Odobravači')]);
 }
 
 // Odobreno / odbijeno → korisnik; odobren godišnji → i rješenje (korisniku i za štampu).
 export async function obavijestiObradjen(supabase, zahtjev, adresa, { rjesenje } = {}) {
   const upozorenja = [];
+  const poslovi = [];
   const odobreno = zahtjev.status === 'odobreno';
   const emailZaposlenog = await emailKorisnika(supabase, zahtjev.korisnik_id);
   const prilozi = rjesenje ? [{ filename: rjesenje.naziv, content: rjesenje.pdf, contentType: 'application/pdf' }] : [];
@@ -76,7 +92,7 @@ export async function obavijestiObradjen(supabase, zahtjev, adresa, { rjesenje }
   ];
 
   if (emailZaposlenog) {
-    const r = await posaljiEmail({
+    poslovi.push(async () => upozorenje(await posaljiEmail({
       prima: emailZaposlenog,
       naslov: odobreno ? `Slobodni dani su odobreni (${period(zahtjev)})` : `Zahtjev za slobodne dane je odbijen (${period(zahtjev)})`,
       sadrzaj: {
@@ -88,8 +104,7 @@ export async function obavijestiObradjen(supabase, zahtjev, adresa, { rjesenje }
         dugme: { tekst: 'Otvori slobodne dane', adresa: `${adresa}/odsustvo` },
       },
       prilozi,
-    });
-    upozorenja.push(...upozorenje(r, 'Zaposleni'));
+    }), 'Zaposleni'));
   } else {
     upozorenja.push(`${zahtjev.korisnik_ime} nema upisan email, pa nije obaviješten.`);
   }
@@ -99,7 +114,7 @@ export async function obavijestiObradjen(supabase, zahtjev, adresa, { rjesenje }
     if (zaStampu.length === 0) {
       upozorenja.push('Niko nema dozvolu "Prima dokument za štampu" sa upisanim emailom, pa rješenje nije poslato na štampu.');
     } else {
-      const r = await posaljiEmail({
+      poslovi.push(async () => upozorenje(await posaljiEmail({
         prima: zaStampu,
         naslov: `Rješenje za štampu: ${zahtjev.korisnik_ime}, ${period(zahtjev)}`,
         sadrzaj: {
@@ -110,17 +125,16 @@ export async function obavijestiObradjen(supabase, zahtjev, adresa, { rjesenje }
           redovi,
         },
         prilozi,
-      });
-      upozorenja.push(...upozorenje(r, 'Dokument za štampu'));
+      }), 'Dokument za štampu'));
     }
   }
-  return upozorenja;
+  return pripremi(upozorenja, poslovi);
 }
 
 // Odobravač otkazao već odobren zahtjev → korisnik i oni koji primaju dokument (da ponište rješenje).
 export async function obavijestiOtkazanOdobren(supabase, zahtjev) {
-  const prima = [await emailKorisnika(supabase, zahtjev.korisnik_id), ...(await emailoviSaDozvolom(supabase, 'odsustvo_dokument'))];
-  const r = await posaljiEmail({
+  const prima = [await emailKorisnika(supabase, zahtjev.korisnik_id), ...(await emailoviSaDozvolom(supabase, 'odsustvo_dokument'))].filter(Boolean);
+  return pripremi([], prima.length ? [async () => upozorenje(await posaljiEmail({
     prima,
     naslov: `Odobreni slobodni dani su otkazani: ${zahtjev.korisnik_ime}, ${period(zahtjev)}`,
     sadrzaj: {
@@ -128,8 +142,7 @@ export async function obavijestiOtkazanOdobren(supabase, zahtjev) {
       uvod: `${zahtjev.obradio_ime} je otkazao/la odobreni zahtjev.${zahtjev.broj_rjesenja ? ` Rješenje br. ${zahtjev.broj_rjesenja} više ne važi.` : ''}`,
       redovi: detalji(zahtjev),
     },
-  });
-  return upozorenje(r, 'Otkazivanje');
+  }), 'Otkazivanje')] : []);
 }
 
 // Rješenje za odobren godišnji: broj, redni dio u godini i PDF.
