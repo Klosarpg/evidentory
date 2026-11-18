@@ -65,8 +65,9 @@ export default function Dashboard() {
   const [noviKorisnikIme, setNoviKorisnikIme] = useState('');
   const [noviKorisnikLozinka, setNoviKorisnikLozinka] = useState('');
   const [noviKorisnikUloga, setNoviKorisnikUloga] = useState('Korisnik');
-  const [lozinkaKorisnikId, setLozinkaKorisnikId] = useState('');
-  const [lozinkaNova, setLozinkaNova] = useState('');
+  const [urediKorisnikId, setUrediKorisnikId] = useState(null);
+  const [urediKorisnikIme, setUrediKorisnikIme] = useState('');
+  const [urediKorisnikLozinka, setUrediKorisnikLozinka] = useState('');
   const [korisnikSlanje, setKorisnikSlanje] = useState(false);
 
   const [naziv, setNaziv] = useState('');
@@ -346,20 +347,55 @@ export default function Dashboard() {
     }
   };
 
-  const promijeniLozinkuKorisnika = async (e) => {
+  const korisnickoImeIz = (email) => (email || '').replace('@evidentory.com', '');
+
+  const pocniUredjivanjeKorisnika = (p) => {
+    setUrediKorisnikId(p.id);
+    setUrediKorisnikIme(korisnickoImeIz(p.email));
+    setUrediKorisnikLozinka('');
+  };
+
+  const odustaniOdUredjivanja = () => {
+    setUrediKorisnikId(null);
+    setUrediKorisnikIme('');
+    setUrediKorisnikLozinka('');
+  };
+
+  const sacuvajKorisnika = async (e) => {
     e.preventDefault();
     if (korisnikSlanje) return;
     setKorisnikSlanje(true);
     try {
-      const { ok, poruka } = await pozoviKorisnickiApi('PATCH', { id: lozinkaKorisnikId, lozinka: lozinkaNova });
-      if (!ok) return paziIPokreniObavestenje("Lozinka nije promijenjena", poruka || 'Došlo je do greške. Pokušaj ponovo.');
-      const p = profili.find(x => x.id === lozinkaKorisnikId);
-      paziIPokreniObavestenje("Lozinka je promijenjena", `Nova lozinka za "${(p?.email || '').replace('@evidentory.com', '')}" je sačuvana.`);
-      setLozinkaKorisnikId('');
-      setLozinkaNova('');
+      const ime = urediKorisnikIme.trim().toLowerCase();
+      const { ok, poruka } = await pozoviKorisnickiApi('PATCH', {
+        id: urediKorisnikId,
+        korisnickoIme: ime,
+        lozinka: urediKorisnikLozinka || undefined,
+      });
+      if (!ok) return paziIPokreniObavestenje("Izmjena nije sačuvana", poruka || 'Došlo je do greške. Pokušaj ponovo.');
+      paziIPokreniObavestenje("Korisnik je izmijenjen", urediKorisnikLozinka
+        ? `Korisnik "${ime}" je sačuvan, sa novom lozinkom.`
+        : `Korisnik "${ime}" je sačuvan. Lozinka je ostala ista.`);
+      odustaniOdUredjivanja();
+      inicijalizujAplikaciju();
     } finally {
       setKorisnikSlanje(false);
     }
+  };
+
+  const obrisiKorisnika = (p) => {
+    const ime = korisnickoImeIz(p.email);
+    setPotvrdaModal({
+      naslov: "Obriši korisnika",
+      poruka: `Korisnik "${ime}" više neće moći da se prijavi. Njegovi dosadašnji unosi u istoriji prometa ostaju sačuvani. Ova akcija se ne može poništiti.`,
+      akcija: async () => {
+        setPotvrdaModal(null);
+        const { ok, poruka } = await pozoviKorisnickiApi('DELETE', { id: p.id });
+        if (!ok) return paziIPokreniObavestenje("Korisnik nije obrisan", poruka || 'Došlo je do greške. Pokušaj ponovo.');
+        paziIPokreniObavestenje("Korisnik je obrisan", `Nalog "${ime}" je uklonjen.`);
+        inicijalizujAplikaciju();
+      },
+    });
   };
 
   const otvoriBrisanjeLoga = (log) => {
@@ -1579,7 +1615,7 @@ export default function Dashboard() {
 
               <div className="border border-slate-200 rounded-2xl p-5 bg-white">
                 <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-3">Uloge i dozvole korisnika</h3>
-                <form onSubmit={kreirajKorisnika} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end bg-slate-50 p-3 rounded-xl border border-slate-200 mb-3">
+                <form onSubmit={kreirajKorisnika} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end bg-slate-50 p-3 rounded-xl border border-slate-200 mb-4">
                   <div>
                     <label htmlFor="novi-ime" className="block text-[11px] font-bold text-slate-600 mb-1">Novi korisnik: korisničko ime *</label>
                     <input id="novi-ime" required minLength={3} maxLength={30} pattern="[A-Za-z0-9._\-]+" title="Slova bez kvačica, brojevi, tačka, crtica i donja crta" autoComplete="off" placeholder="npr. marko" value={noviKorisnikIme} onChange={e => setNoviKorisnikIme(e.target.value)} className="w-full border border-slate-200 p-2 rounded-lg text-xs bg-white outline-none focus:border-blue-500 font-semibold" />
@@ -1598,38 +1634,50 @@ export default function Dashboard() {
                   </div>
                   <button type="submit" disabled={korisnikSlanje} className="w-full bg-blue-600 hover:bg-blue-700 text-white text-xs py-2 rounded-lg font-bold transition-all shadow-md disabled:bg-blue-400 disabled:cursor-wait">{korisnikSlanje ? 'Spremanje…' : 'Kreiraj korisnika'}</button>
                 </form>
-                <form onSubmit={promijeniLozinkuKorisnika} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end bg-slate-50 p-3 rounded-xl border border-slate-200 mb-4">
-                  <div className="md:col-span-2">
-                    <label htmlFor="lozinka-korisnik" className="block text-[11px] font-bold text-slate-600 mb-1">Promijeni lozinku korisniku *</label>
-                    <select id="lozinka-korisnik" required value={lozinkaKorisnikId} onChange={e => setLozinkaKorisnikId(e.target.value)} className="w-full border border-slate-200 p-2.5 rounded-lg text-xs bg-white outline-none focus:border-blue-500 font-semibold text-slate-700">
-                      <option value="">Izaberi korisnika…</option>
-                      {profili.map(p => <option key={p.id} value={p.id}>{(p.email || '').replace('@evidentory.com', '')}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label htmlFor="lozinka-nova" className="block text-[11px] font-bold text-slate-600 mb-1">Nova lozinka *</label>
-                    <input id="lozinka-nova" type="text" required minLength={6} autoComplete="off" value={lozinkaNova} onChange={e => setLozinkaNova(e.target.value)} className="w-full border border-slate-200 p-2 rounded-lg text-xs bg-white outline-none focus:border-blue-500 font-semibold" />
-                  </div>
-                  <button type="submit" disabled={korisnikSlanje} className="w-full bg-slate-800 hover:bg-slate-900 text-white text-xs py-2 rounded-lg font-bold transition-all shadow-md disabled:bg-slate-400 disabled:cursor-wait">Sačuvaj lozinku</button>
-                </form>
                 <div className="border border-slate-200 rounded-xl overflow-hidden bg-slate-50/50">
                   <table className="w-full text-left text-sm">
                     <thead>
                       <tr className="bg-slate-100 border-b border-slate-200">
                         <th className="px-4 py-2 text-xs font-semibold text-slate-500">Korisnik</th>
                         <th className="px-4 py-2 text-xs font-semibold text-slate-500 text-right">Dodijeljena uloga</th>
+                        <th className="px-4 py-2 text-xs font-semibold text-slate-500 text-right">Akcije</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200">
-                      {profili.map(p => (
+                      {profili.map(p => urediKorisnikId === p.id ? (
+                        <tr key={p.id} className="bg-white">
+                          <td colSpan={3} className="px-4 py-3">
+                            <form onSubmit={sacuvajKorisnika} className="flex flex-col md:flex-row md:items-end gap-3">
+                              <div className="flex-1">
+                                <label htmlFor="uredi-ime" className="block text-[11px] font-bold text-slate-600 mb-1">Korisničko ime *</label>
+                                <input id="uredi-ime" required minLength={3} maxLength={30} pattern="[A-Za-z0-9._\-]+" title="Slova bez kvačica, brojevi, tačka, crtica i donja crta" autoComplete="off" value={urediKorisnikIme} onChange={e => setUrediKorisnikIme(e.target.value)} className="w-full border border-slate-300 px-2 py-1.5 rounded-lg text-xs bg-white font-semibold text-slate-700 outline-none focus:border-blue-500" />
+                              </div>
+                              <div className="flex-1">
+                                <label htmlFor="uredi-lozinka" className="block text-[11px] font-bold text-slate-600 mb-1">Nova lozinka (prazno = ostaje ista)</label>
+                                <input id="uredi-lozinka" type="text" minLength={6} autoComplete="off" value={urediKorisnikLozinka} onChange={e => setUrediKorisnikLozinka(e.target.value)} className="w-full border border-slate-300 px-2 py-1.5 rounded-lg text-xs bg-white font-semibold text-slate-700 outline-none focus:border-blue-500" />
+                              </div>
+                              <div className="flex gap-2">
+                                <button type="button" onClick={odustaniOdUredjivanja} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs rounded-lg font-bold">Odustani</button>
+                                <button type="submit" disabled={korisnikSlanje} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded-lg font-bold disabled:bg-blue-400 disabled:cursor-wait">{korisnikSlanje ? 'Spremanje…' : 'Sačuvaj'}</button>
+                              </div>
+                            </form>
+                          </td>
+                        </tr>
+                      ) : (
                         <tr key={p.id} className="hover:bg-white transition-colors">
-                          <td className="px-4 py-3 font-medium text-slate-700">{(p.email || '').replace('@evidentory.com', '')}</td>
+                          <td className="px-4 py-3 font-medium text-slate-700">{korisnickoImeIz(p.email)}</td>
                           <td className="px-4 py-3 text-right">
-                            <select value={p.uloga} onChange={(e) => promijeniUloguKorisnika(p.id, e.target.value)} className="border border-slate-300 px-2 py-1.5 rounded-lg text-xs bg-white font-semibold text-slate-700 outline-none focus:border-blue-500">
-                              <option value="Korisnik">Korisnik (Read-only)</option>
+                            <select aria-label={`Uloga korisnika ${korisnickoImeIz(p.email)}`} value={p.uloga} onChange={(e) => promijeniUloguKorisnika(p.id, e.target.value)} className="border border-slate-300 px-2 py-1.5 rounded-lg text-xs bg-white font-semibold text-slate-700 outline-none focus:border-blue-500">
+                              <option value="Korisnik">Korisnik (samo pregled)</option>
                               <option value="Korisnik sa pravom povlacenja">Korisnik sa pravom povlačenja</option>
-                              <option value="Admin">Admin (Sve dozvole)</option>
+                              <option value="Admin">Admin (sve dozvole)</option>
                             </select>
+                          </td>
+                          <td className="px-4 py-3 text-right whitespace-nowrap space-x-3">
+                            <button type="button" onClick={() => pocniUredjivanjeKorisnika(p)} className="text-blue-700 hover:text-blue-900 text-xs font-bold">Uredi</button>
+                            {korisnickoImeIz(p.email) !== korisnikEmail && (
+                              <button type="button" onClick={() => obrisiKorisnika(p)} className="text-red-600 hover:text-red-800 text-xs font-bold">Obriši</button>
+                            )}
                           </td>
                         </tr>
                       ))}

@@ -14,6 +14,14 @@ function adminKlijent() {
   });
 }
 
+const IME_REGEX = /^[a-z0-9._-]{3,30}$/;
+const PORUKA_IME = 'Korisničko ime: 3–30 znakova, samo slova bez kvačica, brojevi, tačka, crtica i donja crta.';
+
+function jeZauzeto(error) {
+  const m = (error?.message || '').toLowerCase();
+  return m.includes('already') || m.includes('registered') || m.includes('exists');
+}
+
 function greska(poruka, status = 400) {
   return NextResponse.json({ error: poruka }, { status });
 }
@@ -47,7 +55,7 @@ async function provjeriAdmina(request) {
   }
   if (profil?.uloga !== 'Admin') return { odgovor: greska('Samo administrator može upravljati korisnicima.', 403) };
 
-  return { supabase };
+  return { supabase, adminId: data.user.id };
 }
 
 // POST /api/korisnici  { korisnickoIme, lozinka, uloga }  → kreira novi nalog
@@ -60,9 +68,7 @@ export async function POST(request) {
   const lozinka = String(tijelo.lozinka || '');
   const uloga = DOZVOLJENE_ULOGE.includes(tijelo.uloga) ? tijelo.uloga : 'Korisnik';
 
-  if (!/^[a-z0-9._-]{3,30}$/.test(ime)) {
-    return greska('Korisničko ime: 3–30 znakova, samo slova bez kvačica, brojevi, tačka, crtica i donja crta.');
-  }
+  if (!IME_REGEX.test(ime)) return greska(PORUKA_IME);
   if (lozinka.length < MIN_LOZINKA) return greska(`Lozinka mora imati najmanje ${MIN_LOZINKA} znakova.`);
 
   const email = `${ime}@${DOMEN}`;
@@ -73,11 +79,8 @@ export async function POST(request) {
   });
 
   if (error) {
-    const m = (error.message || '').toLowerCase();
-    if (m.includes('already') || m.includes('registered') || m.includes('exists')) {
-      return greska(`Korisničko ime "${ime}" je već zauzeto.`);
-    }
-    if (m.includes('password')) return greska('Lozinka nije prihvaćena. Probaj dužu lozinku.');
+    if (jeZauzeto(error)) return greska(`Korisničko ime "${ime}" je već zauzeto.`);
+    if ((error.message || '').toLowerCase().includes('password')) return greska('Lozinka nije prihvaćena. Probaj dužu lozinku.');
     console.error('Kreiranje korisnika nije uspjelo:', error.message);
     return greska('Korisnik nije kreiran. Pokušaj ponovo.', 500);
   }
@@ -93,21 +96,71 @@ export async function POST(request) {
   return NextResponse.json({ success: true });
 }
 
-// PATCH /api/korisnici  { id, lozinka }  → admin postavlja novu lozinku korisniku
+// PATCH /api/korisnici  { id, korisnickoIme?, lozinka? }  → mijenja korisničko ime i/ili lozinku
 export async function PATCH(request) {
   const { supabase, odgovor } = await provjeriAdmina(request);
   if (odgovor) return odgovor;
 
   const tijelo = await request.json().catch(() => ({}));
   const id = String(tijelo.id || '');
-  const lozinka = String(tijelo.lozinka || '');
   if (!id) return greska('Izaberi korisnika.');
-  if (lozinka.length < MIN_LOZINKA) return greska(`Lozinka mora imati najmanje ${MIN_LOZINKA} znakova.`);
 
-  const { error } = await supabase.auth.admin.updateUserById(id, { password: lozinka });
+  const izmjene = {};
+  let noviEmail = null;
+
+  if (tijelo.korisnickoIme !== undefined) {
+    const ime = String(tijelo.korisnickoIme).trim().toLowerCase();
+    if (!IME_REGEX.test(ime)) return greska(PORUKA_IME);
+    noviEmail = `${ime}@${DOMEN}`;
+  }
+  if (tijelo.lozinka) {
+    const lozinka = String(tijelo.lozinka);
+    if (lozinka.length < MIN_LOZINKA) return greska(`Lozinka mora imati najmanje ${MIN_LOZINKA} znakova.`);
+    izmjene.password = lozinka;
+  }
+
+  const { data: postojeci, error: citanjeGreska } = await supabase.auth.admin.getUserById(id);
+  if (citanjeGreska || !postojeci?.user) return greska('Korisnik nije pronađen.', 404);
+
+  if (noviEmail && noviEmail !== postojeci.user.email) {
+    izmjene.email = noviEmail;
+    izmjene.email_confirm = true; // bez emaila za potvrdu
+  }
+  if (Object.keys(izmjene).length === 0) return NextResponse.json({ success: true });
+
+  const { error } = await supabase.auth.admin.updateUserById(id, izmjene);
   if (error) {
-    console.error('Promjena lozinke nije uspjela:', error.message);
-    return greska('Lozinka nije promijenjena. Pokušaj ponovo.', 500);
+    if (jeZauzeto(error)) return greska('To korisničko ime je već zauzeto.');
+    console.error('Izmjena korisnika nije uspjela:', error.message);
+    return greska('Izmjena nije sačuvana. Pokušaj ponovo.', 500);
+  }
+
+  if (izmjene.email) {
+    const { error: profilGreska } = await supabase.from('profili').update({ email: izmjene.email }).eq('id', id);
+    if (profilGreska) console.error('Email u profilu nije ažuriran:', profilGreska.message);
+  }
+  return NextResponse.json({ success: true });
+}
+
+// DELETE /api/korisnici  { id }  → briše nalog i profil
+export async function DELETE(request) {
+  const { supabase, adminId, odgovor } = await provjeriAdmina(request);
+  if (odgovor) return odgovor;
+
+  const tijelo = await request.json().catch(() => ({}));
+  const id = String(tijelo.id || '');
+  if (!id) return greska('Izaberi korisnika.');
+  if (id === adminId) return greska('Ne možeš obrisati sopstveni nalog.');
+
+  // Profil čuvamo sa strane da ga vratimo ako brisanje naloga ne uspije.
+  const { data: profil } = await supabase.from('profili').select('*').eq('id', id).maybeSingle();
+  await supabase.from('profili').delete().eq('id', id);
+
+  const { error } = await supabase.auth.admin.deleteUser(id);
+  if (error) {
+    console.error('Brisanje korisnika nije uspjelo:', error.message);
+    if (profil) await supabase.from('profili').upsert(profil, { onConflict: 'id' });
+    return greska('Korisnik nije obrisan. Pokušaj ponovo.', 500);
   }
   return NextResponse.json({ success: true });
 }
