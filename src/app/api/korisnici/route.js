@@ -138,6 +138,25 @@ export async function PATCH(request) {
   if (izmjene.email) {
     const { error: profilGreska } = await supabase.from('profili').update({ email: izmjene.email }).eq('id', id);
     if (profilGreska) console.error('Email u profilu nije ažuriran:', profilGreska.message);
+
+    // Novo ime upisujemo i u sve unose ovog korisnika u istoriji prometa.
+    const staroIme = (postojeci.user.email || '').split('@')[0];
+    const novoIme = izmjene.email.split('@')[0];
+    const { error: istorijaGreska } = await supabase.from('istorija').update({ korisnik: novoIme }).eq('korisnik_id', id);
+    // Stariji unosi koji još nisu povezani sa nalogom: po starom imenu, i odmah ih povezujemo.
+    const { error: stariGreska } = await supabase
+      .from('istorija')
+      .update({ korisnik: novoIme, korisnik_id: id })
+      .is('korisnik_id', null)
+      .eq('korisnik', staroIme);
+    const greskaIstorije = istorijaGreska || stariGreska;
+    if (greskaIstorije) {
+      console.error('Istorija nije ažurirana:', greskaIstorije.message);
+      return greska(
+        `Korisnik je preimenovan, ali istorija nije ažurirana (${greskaIstorije.message}). Provjeri da li je pokrenut SQL "istorija-korisnik.sql".`,
+        500
+      );
+    }
   }
   return NextResponse.json({ success: true });
 }
