@@ -2,10 +2,11 @@ import { jsPDF } from 'jspdf';
 import { LIBERATION_REGULAR, LIBERATION_BOLD } from '@/lib/fontovi';
 import { FIRMA } from '@/lib/firma';
 import { GODISNJA_KVOTA } from '@/lib/odsustvo';
+import { dativImena } from '@/lib/dativ';
 
 // PDF "Rješenje o korišćenju godišnjeg odmora" po šablonu firme.
 // JMBG se upisuje ako je unesen u aplikaciji, inače ostaje prazna linija.
-// Pečat i potpis se stavljaju ako su postavljeni u Supabase Storage (bucket "firma"), inače ostaje linija za potpis i M.P.
+// Pečat i potpis se stavljaju ako su postavljeni u Supabase Storage (bucket "firma"), inače ostaje prazna linija za potpis.
 
 const MJESECI_GENITIV = ['januara', 'februara', 'marta', 'aprila', 'maja', 'juna', 'jula', 'avgusta', 'septembra', 'oktobra', 'novembra', 'decembra'];
 const REDNI = ['prvi', 'drugi', 'treći', 'četvrti', 'peti', 'šesti', 'sedmi', 'osmi', 'deveti', 'deseti'];
@@ -45,6 +46,8 @@ export function redniDio(n) {
 export function napraviRjesenje({ zahtjev, profil, broj, datum, redni, jmbg = null, slike = {} }) {
   const zenski = profil.pol === 'Ž';
   const ime = profil.ime_prezime || zahtjev.korisnik_ime;
+  const imeDativ = profil.ime_prezime_dativ || (profil.ime_prezime ? dativImena(profil.ime_prezime, profil.pol) : ime);
+  const rasporedjen = zenski ? 'raspoređenoj' : 'raspoređenom';
   const radnoMjesto = profil.radno_mjesto || '________________________________';
   const odnos = profil.radni_odnos === 'određeno' ? 'određeno' : 'neodređeno';
   // Rješenje se piše za tekuću godinu: godinu datuma rješenja.
@@ -99,12 +102,12 @@ export function napraviRjesenje({ zahtjev, profil, broj, datum, redni, jmbg = nu
   pasus('O KORIŠĆENJU GODIŠNJEG ODMORA', { align: 'center', bold: true, razmak: 5 });
 
   pasus(
-    `1. ${ime} JMBG ${jmbg || '____________________'}, raspoređen${zenski ? 'a' : ''} na radno mjesto ${radnoMjesto}, ` +
+    `1. ${ime}, JMBG ${jmbg || '____________________'}, ${rasporedjen} na radno mjesto ${radnoMjesto}, ` +
     `ima pravo na godišnji odmor za ${godina}. godinu u ukupnom trajanju od ${radnihDana(GODISNJA_KVOTA)}.`,
     { razmak: 4 }
   );
   pasus(
-    `2. Zaposlen${zenski ? 'a' : 'i'} će ${redniDio(redni)} dio godišnjeg odmora u ukupnom trajanju od ` +
+    `2. Zaposlen${zenski ? 'a' : 'i'} će dio godišnjeg odmora u ukupnom trajanju od ` +
     `${radnihDana(zahtjev.radnih_dana)} koristiti ${periodRijecima(zahtjev.datum_od, zahtjev.datum_do)}.`,
     { razmak: 4 }
   );
@@ -116,19 +119,17 @@ export function napraviRjesenje({ zahtjev, profil, broj, datum, redni, jmbg = nu
 
   pasus('Obrazloženje', { align: 'center', razmak: 3 });
   pasus(
-    `Zaposlen${zenski ? 'a' : 'i'} ${ime}, ${zenski ? 'koja' : 'koji'} je u radnom odnosu na ${odnos} vrijeme u ` +
-    `${FIRMA.nazivUTekstu} ${FIRMA.mjesto}, raspoređen${zenski ? 'a' : ''} na radnom mjestu ${radnoMjesto}, ` +
-    `koristi odmor za ${godina}. godinu koji ${zenski ? 'joj' : 'mu'} obezbjeđuje Poslodavac, u periodu kako je ` +
-    'navedeno u dispozitivu ovog Rješenja.',
+    `Zaposlen${zenski ? 'oj' : 'om'} ${imeDativ}, ${zenski ? 'koja' : 'koji'} je u radnom odnosu na ${odnos} vrijeme u ` +
+    `${FIRMA.nazivUTekstu} ${FIRMA.mjesto}, ${rasporedjen} na radnom mjestu ${radnoMjesto}, ` +
+    `Poslodavac obezbjeđuje korišćenje odmora za ${godina}. godinu, u periodu kako je navedeno u dispozitivu ovog Rješenja.`,
     { razmak: 3 }
   );
   pasus(
     'U zavisnosti od potreba procesa rada Poslodavac je na osnovu Plana korišćenja godišnjih odmora, odlučio o ' +
     'vremenu korišćenja godišnjeg odmora. Godišnji odmor zaposlenom utvrđen je brojem radnih dana zavisno od ' +
     'sedmičnog rasporeda radnog vremena Zaposlenog, pri čemu se radna sedmica računa kao pet radnih dana, shodno ' +
-    'članu 80 stav 2 Zakona o radu. Dužina godišnjeg odmora utvrđena je u skladu sa članom 81 stav 1 Zakona o radu, ' +
-    'kojim je propisano da zaposleni ima pravo na godišnji odmor u trajanju od najmanje 20 radnih dana u svakoj ' +
-    'kalendarskoj godini.',
+    'članu 80 stav 2 Zakona o radu. Dužina godišnjeg odmora utvrđena je tako što se broj radnih dana iz ' +
+    'člana 65 stav 1 Zakona o radu (20 radnih dana).',
     { razmak: 4 }
   );
   pasus(
@@ -148,8 +149,8 @@ export function napraviRjesenje({ zahtjev, profil, broj, datum, redni, jmbg = nu
   novaStranaAkoTreba(30);
   const yDostavljeno = y;
   pasus('Dostavljeno:', { align: 'left', razmak: 0 });
-  pasus('•  Zaposlenom', { align: 'left', razmak: 0, uvlaka: 6 });
-  pasus('•  U dosije', { align: 'left', razmak: 0, uvlaka: 6 });
+  pasus(zenski ? 'Zaposlenoj' : 'Zaposlenom', { align: 'left', razmak: 0 });
+  pasus('U dosije', { align: 'left', razmak: 0 });
 
   const sirinaPotpisa = 70;
   const sredinaPotpisa = desno - sirinaPotpisa / 2;
@@ -160,18 +161,14 @@ export function napraviRjesenje({ zahtjev, profil, broj, datum, redni, jmbg = nu
   doc.text(FIRMA.nazivUTekstu, sredinaPotpisa, yFirma, { align: 'center' });
   doc.setLineWidth(0.3);
   doc.line(desno - sirinaPotpisa, yLinija, desno, yLinija);
-  doc.setFontSize(9);
-  doc.text('potpis', sredinaPotpisa, yLinija + 4.5, { align: 'center' });
 
   const slika = (s) => `data:image/${s.format === 'PNG' ? 'png' : 'jpeg'};base64,${s.base64}`;
-  // Pečat lijevo od potpisa, preko početka linije (kao na originalu). Bez pečata ostaje oznaka M.P.
+  // Pečat lijevo od potpisa, preko početka linije (kao na originalu). Bez pečata ostaje samo linija, kao na šablonu.
   if (slike.pecat) {
     const sirina = 34;
     const visina = Math.min(34, (sirina * slike.pecat.visina) / slike.pecat.sirina);
     const s = (visina * slike.pecat.sirina) / slike.pecat.visina;
     doc.addImage(slika(slike.pecat), slike.pecat.format, desno - sirinaPotpisa - s / 2, yLinija - visina / 2 - 4, s, visina);
-  } else {
-    doc.text('M.P.', desno - sirinaPotpisa - 14, yLinija);
   }
   // Potpis centriran na liniji, malo spušten preko nje.
   if (slike.potpis) {

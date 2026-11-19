@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase';
 import { ucitajMojeDozvole, DOZVOLE } from '@/lib/dozvole';
 import { SLAVE, NAZIVI_MJESECI, danasUCrnojGori, danUSedmici, formatirajDatum, formatirajSlavu, periodZaDatum, nazivPerioda, granicePerioda } from '@/lib/odsustvo';
 import { FOKUS, POLJE, DUGME, Ikona, Poruka, Potvrda, Sekcija } from '../_komponente/ui';
+import { dativImena } from '@/lib/dativ';
 
 // Administracija: jedno mjesto za cijeli program (korisnici, uloge), zalihe (komitenti, istorija)
 // i slobodne dane (praznici). Dostupno samo ulogama sa dozvolom "admin".
@@ -471,6 +472,7 @@ function NalogForma({ profil, podaci, izvrsi }) {
 
 function PodaciForma({ profil, izvrsi }) {
   const [imePrezime, setImePrezime] = useState(profil.ime_prezime || '');
+  const [imePrezimeDativ, setImePrezimeDativ] = useState(profil.ime_prezime_dativ || '');
   const [radnoMjesto, setRadnoMjesto] = useState(profil.radno_mjesto || '');
   const [pol, setPol] = useState(profil.pol || '');
   const [radniOdnos, setRadniOdnos] = useState(profil.radni_odnos || 'neodređeno');
@@ -480,7 +482,7 @@ function PodaciForma({ profil, izvrsi }) {
     e.preventDefault();
     setSlanje(true);
     await izvrsi(
-      () => pozoviApi('/api/odsustvo', 'POST', { akcija: 'podaci', korisnikId: profil.id, imePrezime, radnoMjesto, pol, radniOdnos }),
+      () => pozoviApi('/api/odsustvo', 'POST', { akcija: 'podaci', korisnikId: profil.id, imePrezime, imePrezimeDativ, radnoMjesto, pol, radniOdnos }),
       'Podaci za rješenje su sačuvani.'
     );
     setSlanje(false);
@@ -491,10 +493,13 @@ function PodaciForma({ profil, izvrsi }) {
       <Polje id="r-ime" label="Ime i prezime">
         <input id="r-ime" value={imePrezime} onChange={(e) => setImePrezime(e.target.value)} placeholder="npr. Marko Marković" className={POLJE} />
       </Polje>
+      <Polje id="r-dativ" label="Ime i prezime u dativu (kome?)" pomoc={`Za obrazloženje rješenja. Ako ostane prazno, piše se: ${dativImena(imePrezime, pol) || '…'}`}>
+        <input id="r-dativ" value={imePrezimeDativ} onChange={(e) => setImePrezimeDativ(e.target.value)} placeholder={dativImena(imePrezime, pol) || 'npr. Marku Markoviću'} className={POLJE} />
+      </Polje>
       <Polje id="r-mjesto" label="Radno mjesto">
         <input id="r-mjesto" value={radnoMjesto} onChange={(e) => setRadnoMjesto(e.target.value)} className={POLJE} />
       </Polje>
-      <Polje id="r-pol" label="Pol" pomoc="Za oblike riječi na rješenju (raspoređen / raspoređena).">
+      <Polje id="r-pol" label="Pol" pomoc="Za oblike riječi na rješenju (raspoređenom / raspoređenoj).">
         <select id="r-pol" value={pol} onChange={(e) => setPol(e.target.value)} className={POLJE}>
           <option value="">Nije izabrano</option>
           <option value="M">Muški</option>

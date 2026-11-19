@@ -65,6 +65,9 @@ function porukaZaBazu(e) {
   if (/zaposleni_jmbg/.test(m) && /(does not exist|schema cache|not find)/i.test(m)) {
     return 'Tabela za JMBG ne postoji. Pokreni SQL "jmbg-pecat.sql" u Supabase-u.';
   }
+  if (/ime_prezime_dativ/.test(m) && /(does not exist|schema cache|not find)/i.test(m)) {
+    return 'Kolona za ime u dativu ne postoji. Pokreni SQL "rjesenje-dativ.sql" u Supabase-u.';
+  }
   if (/odsustva|praznici|korekcije|slava_datum|ime_prezime|radno_mjesto|broj_rjesenja/.test(m) && /(does not exist|schema cache|not find)/i.test(m)) {
     return 'Tabele za slobodne dane ne postoje. Pokreni SQL "odsustvo.sql" u Supabase-u.';
   }
@@ -274,6 +277,7 @@ async function postaviPodatke(supabase, dozvole, t) {
   const radniOdnos = ['neodređeno', 'određeno'].includes(t.radniOdnos) ? t.radniOdnos : 'neodređeno';
   const { error } = await supabase.from('profili').update({
     ime_prezime: String(t.imePrezime || '').trim().slice(0, 100) || null,
+    ime_prezime_dativ: String(t.imePrezimeDativ || '').trim().slice(0, 100) || null,
     radno_mjesto: String(t.radnoMjesto || '').trim().slice(0, 200) || null,
     pol,
     radni_odnos: radniOdnos,

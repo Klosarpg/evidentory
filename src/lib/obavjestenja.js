@@ -150,7 +150,7 @@ export async function obavijestiOtkazanOdobren(supabase, zahtjev) {
 // Rješenje za odobren godišnji: broj, redni dio u godini i PDF.
 export async function pripremiRjesenje(supabase, zahtjev, datum) {
   const { data: profil } = await supabase
-    .from('profili').select('ime_prezime, radno_mjesto, pol, radni_odnos').eq('id', zahtjev.korisnik_id).maybeSingle();
+    .from('profili').select('*').eq('id', zahtjev.korisnik_id).maybeSingle();
 
   let broj = zahtjev.broj_rjesenja;
   if (!broj) {
