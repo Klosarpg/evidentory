@@ -57,7 +57,7 @@ export default function Login() {
           label="Korisničko ime"
           type="text"
           autoComplete="username"
-          placeholder="npr. marko"
+          placeholder="npr. marko.m"
           value={prijava}
           onChange={(e) => setPrijava(e.target.value)}
         />
