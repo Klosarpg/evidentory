@@ -51,6 +51,7 @@ export async function POST(request) {
     email,
     password: lozinka,
     email_confirm: true, // nalog je odmah aktivan, ne šalje se nikakav email
+    user_metadata: { mora_promijeniti_lozinku: true }, // pri prvoj prijavi korisnik postavlja svoju lozinku
   });
 
   if (error) {
@@ -111,6 +112,8 @@ export async function PATCH(request) {
     const lozinka = String(tijelo.lozinka);
     if (lozinka.length < MIN_LOZINKA) return greska(`Lozinka mora imati najmanje ${MIN_LOZINKA} znakova.`);
     izmjene.password = lozinka;
+    // Lozinku koju je zadao admin korisnik mora zamijeniti svojom pri sledećoj prijavi (osim kad admin mijenja svoju).
+    if (id !== adminId) izmjene.user_metadata = { mora_promijeniti_lozinku: true };
   }
   let kontakt = null;
   if (tijelo.kontaktEmail !== undefined) {

@@ -127,7 +127,8 @@ export function nazivPerioda(period) {
 
 // Stanje godišnjeg za jedan period (bez prenosa: svaki period ima svojih 20 dana).
 // odsustva: [{ tip, status, datum_od, datum_do }]  (računaju se odobrena; sa saNaCekanju i ona na čekanju)
-// korekcije: [{ godina, dana }]  godina = period; dana = umanjenje (iskorišćeno van aplikacije ili srazmjerno ugovoru)
+// korekcije: [{ godina, dana, prenos }]  godina = period; dana = umanjenje (iskorišćeno van aplikacije ili srazmjerno ugovoru);
+//   prenos = dodatni dani preko 20 u tom periodu (kolona se zove "prenos" iz ranije verzije, sada znači "dodatno").
 // period: godina početka perioda. ukupnoPrekoracenje sabira prekoračenja u svim periodima (za provjeru zahtjeva).
 export function izracunajStanje({ odsustva = [], korekcije = [], praznici, slava, period, saNaCekanju = false }) {
   const statusi = saNaCekanju ? ['odobreno', 'na_cekanju'] : ['odobreno'];
@@ -140,11 +141,17 @@ export function izracunajStanje({ odsustva = [], korekcije = [], praznici, slava
     }
   }
   const umanjenje = {};
-  for (const k of korekcije) umanjenje[k.godina] = (umanjenje[k.godina] || 0) + Number(k.dana || 0);
+  const dodatno = {};
+  for (const k of korekcije) {
+    umanjenje[k.godina] = (umanjenje[k.godina] || 0) + Number(k.dana || 0);
+    dodatno[k.godina] = (dodatno[k.godina] || 0) + Number(k.prenos || 0);
+  }
+  const kvotaPerioda = (p) => GODISNJA_KVOTA + (dodatno[p] || 0);
 
   const stanjePerioda = (p) => {
     const iskoristeno = (daniPoPeriodu[p] || 0) + (umanjenje[p] || 0);
-    return { iskoristeno, preostalo: Math.max(0, GODISNJA_KVOTA - iskoristeno), prekoracenje: Math.max(0, iskoristeno - GODISNJA_KVOTA) };
+    const kvota = kvotaPerioda(p);
+    return { iskoristeno, preostalo: Math.max(0, kvota - iskoristeno), prekoracenje: Math.max(0, iskoristeno - kvota) };
   };
 
   const periodi = new Set([period, ...Object.keys(daniPoPeriodu).map(Number), ...Object.keys(umanjenje).map(Number)]);
@@ -155,7 +162,8 @@ export function izracunajStanje({ odsustva = [], korekcije = [], praznici, slava
   const g = granicePerioda(period);
   return {
     period,
-    kvota: GODISNJA_KVOTA,
+    kvota: kvotaPerioda(period),
+    dodatno: dodatno[period] || 0,
     umanjenje: umanjenje[period] || 0,
     iskoristeno: s.iskoristeno,
     preostalo: s.preostalo,

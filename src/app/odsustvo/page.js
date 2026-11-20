@@ -299,7 +299,7 @@ function MojiDani({ ja, praznici, odsustva, profili, korekcije, danas, godina, a
 
   return (
     <div className="space-y-8">
-      <StanjePregled stanje={stanje} godina={godina} />
+      <StanjePregled stanje={stanje} godina={godina} napomena={mojeKorekcije.find((k) => k.godina === godina)?.napomena} />
 
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_340px] gap-6">
         <section aria-labelledby="naslov-kalendar" className="bg-white border border-slate-200 rounded-2xl p-5">
@@ -372,10 +372,10 @@ function MojiDani({ ja, praznici, odsustva, profili, korekcije, danas, godina, a
   );
 }
 
-function StanjePregled({ stanje, godina }) {
+function StanjePregled({ stanje, godina, napomena }) {
   const stavke = [
-    { naziv: 'Pripada', vrijednost: stanje.kvota, opis: `za period ${nazivPerioda(godina)}` },
-    { naziv: 'Iskorišćeno', vrijednost: stanje.iskoristeno, opis: stanje.umanjenje ? `od toga ${stanje.umanjenje} umanjenje` : 'odobreni zahtjevi' },
+    { naziv: 'Pripada', vrijednost: stanje.kvota, opis: stanje.dodatno ? `za period ${nazivPerioda(godina)}, od toga ${stanje.dodatno} dodatno` : `za period ${nazivPerioda(godina)}` },
+    { naziv: 'Iskorišćeno', vrijednost: stanje.iskoristeno, opis: stanje.umanjenje ? `od toga ${stanje.umanjenje} van aplikacije` : 'odobreni zahtjevi' },
     { naziv: 'Na čekanju', vrijednost: stanje.naCekanju, opis: stanje.naCekanju ? 'čeka odobrenje' : 'nema zahtjeva' },
     { naziv: 'Ističe', vrijednost: formatirajDatum(stanje.istice), opis: 'neiskorišćeni dani propadaju', datum: true },
   ];
@@ -403,6 +403,11 @@ function StanjePregled({ stanje, godina }) {
           ))}
         </dl>
       </div>
+      {napomena && (
+        <p className="px-6 py-3 border-t border-slate-200 text-sm text-slate-700">
+          <span className="font-semibold">Napomena administratora:</span> {napomena}
+        </p>
+      )}
       {stanje.prekoracenje > 0 && (
         <p className="px-6 py-3 border-t border-slate-200 text-sm text-red-800 bg-red-50 rounded-b-2xl">
           Odobreno je {stanje.prekoracenje} {stanje.prekoracenje === 1 ? 'dan' : 'dana'} više nego što pripada za ovaj period.

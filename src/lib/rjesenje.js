@@ -43,7 +43,7 @@ export function redniDio(n) {
 // zahtjev: red iz "odsustva"; profil: { ime_prezime, radno_mjesto, pol, radni_odnos }
 // broj: broj rješenja; datum: 'YYYY-MM-DD'; redni: koji je ovo dio odmora u godini (1, 2, …)
 // jmbg: string ili null; slike: { potpis?, pecat? } iz ucitajSlikeFirme
-export function napraviRjesenje({ zahtjev, profil, broj, datum, redni, jmbg = null, slike = {} }) {
+export function napraviRjesenje({ zahtjev, profil, broj, datum, redni, jmbg = null, slike = {}, pravo = GODISNJA_KVOTA }) {
   const zenski = profil.pol === 'Ž';
   const ime = profil.ime_prezime || zahtjev.korisnik_ime;
   const imeDativ = profil.ime_prezime_dativ || (profil.ime_prezime ? dativImena(profil.ime_prezime, profil.pol) : ime);
@@ -103,7 +103,7 @@ export function napraviRjesenje({ zahtjev, profil, broj, datum, redni, jmbg = nu
 
   pasus(
     `1. ${ime}, JMBG ${jmbg || '____________________'}, ${rasporedjen} na radno mjesto ${radnoMjesto}, ` +
-    `ima pravo na godišnji odmor za ${godina}. godinu u ukupnom trajanju od ${radnihDana(GODISNJA_KVOTA)}.`,
+    `ima pravo na godišnji odmor za ${godina}. godinu u ukupnom trajanju od ${radnihDana(pravo)}.`,
     { razmak: 4 }
   );
   pasus(

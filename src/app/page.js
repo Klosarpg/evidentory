@@ -17,7 +17,7 @@ export default function Login() {
   useEffect(() => {
 
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) router.replace('/pocetna');
+      if (session) router.replace(session.user.user_metadata?.mora_promijeniti_lozinku ? '/promjena-lozinke' : '/pocetna');
       else setProvjera(false);
     });
   }, [router]);
@@ -32,13 +32,14 @@ export default function Login() {
     const unos = prijava.toLowerCase().trim();
     const email = unos.includes('@') ? unos : `${unos}@evidentory.com`;
 
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
     if (error) {
       setGreska(prevediGresku(error));
       setLoading(false);
     } else {
-      router.push('/pocetna');
+      // Nalog koji je napravio admin (ili mu je admin promijenio lozinku) prvo postavlja svoju lozinku.
+      router.push(data.user?.user_metadata?.mora_promijeniti_lozinku ? '/promjena-lozinke' : '/pocetna');
     }
   };
 

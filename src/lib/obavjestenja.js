@@ -1,6 +1,6 @@
 import { posaljiEmail, problemSaPodesavanjem } from '@/lib/email';
 import { napraviRjesenje, nazivFajlaRjesenja } from '@/lib/rjesenje';
-import { TIPOVI, formatirajDatum, formatirajSlavu, periodZaDatum, granicePerioda, nazivPerioda } from '@/lib/odsustvo';
+import { GODISNJA_KVOTA, TIPOVI, formatirajDatum, formatirajSlavu, periodZaDatum, granicePerioda, nazivPerioda } from '@/lib/odsustvo';
 import { ucitajSlikeFirme, ucitajJmbg } from '@/lib/slikeFirme';
 
 // Ko dobija koji email za slobodne dane.
@@ -43,6 +43,15 @@ async function emailKorisnika(supabase, id) {
   return data?.kontakt_email || null;
 }
 
+// U emailovima se umjesto korisničkog imena piše ime i prezime (ako je upisano u Administraciji).
+async function saPunimImenima(supabase, z) {
+  const idovi = [z.korisnik_id, z.obradio_id].filter(Boolean);
+  if (idovi.length === 0) return z;
+  const { data } = await supabase.from('profili').select('id, ime_prezime').in('id', idovi);
+  const ime = (id, rezerva) => (data || []).find((p) => p.id === id)?.ime_prezime || rezerva;
+  return { ...z, korisnik_ime: ime(z.korisnik_id, z.korisnik_ime), obradio_ime: ime(z.obradio_id, z.obradio_ime) };
+}
+
 const period = (z) => (z.datum_od === z.datum_do
   ? formatirajDatum(z.datum_od)
   : `${formatirajDatum(z.datum_od)} – ${formatirajDatum(z.datum_do)}`);
@@ -60,7 +69,8 @@ function detalji(z) {
 const upozorenje = (rezultat, kome) => (rezultat.ok ? [] : [`${kome}: ${rezultat.greska}`]);
 
 // Novi zahtjev → svi odobravači.
-export async function obavijestiNoviZahtjev(supabase, zahtjev, adresa, { manjak = 0 } = {}) {
+export async function obavijestiNoviZahtjev(supabase, zahtjevIzBaze, adresa, { manjak = 0 } = {}) {
+  const zahtjev = await saPunimImenima(supabase, zahtjevIzBaze);
   const prima = await emailoviSaDozvolom(supabase, 'odsustvo_odobravanje', zahtjev.korisnik_id);
   if (prima.length === 0) {
     return pripremi(['Nema drugog odobravača sa upisanim emailom (podnosilac zahtjeva ne dobija obavještenje o sopstvenom zahtjevu), pa obavještenje nije poslato.'], []);
@@ -80,7 +90,8 @@ export async function obavijestiNoviZahtjev(supabase, zahtjev, adresa, { manjak 
 }
 
 // Odobreno / odbijeno → korisnik; odobren godišnji → i rješenje (korisniku i za štampu).
-export async function obavijestiObradjen(supabase, zahtjev, adresa, { rjesenje } = {}) {
+export async function obavijestiObradjen(supabase, zahtjevIzBaze, adresa, { rjesenje } = {}) {
+  const zahtjev = await saPunimImenima(supabase, zahtjevIzBaze);
   const upozorenja = [];
   const poslovi = [];
   const odobreno = zahtjev.status === 'odobreno';
@@ -134,7 +145,8 @@ export async function obavijestiObradjen(supabase, zahtjev, adresa, { rjesenje }
 }
 
 // Odobravač otkazao već odobren zahtjev → korisnik i oni koji primaju dokument (da ponište rješenje).
-export async function obavijestiOtkazanOdobren(supabase, zahtjev) {
+export async function obavijestiOtkazanOdobren(supabase, zahtjevIzBaze) {
+  const zahtjev = await saPunimImenima(supabase, zahtjevIzBaze);
   const prima = [await emailKorisnika(supabase, zahtjev.korisnik_id), ...(await emailoviSaDozvolom(supabase, 'odsustvo_dokument'))].filter(Boolean);
   return pripremi([], prima.length ? [async () => upozorenje(await posaljiEmail({
     prima,
@@ -161,7 +173,12 @@ export async function pripremiRjesenje(supabase, zahtjev, datum) {
   }
   const datumRjesenja = zahtjev.datum_rjesenja || datum;
 
-  const g = granicePerioda(periodZaDatum(zahtjev.datum_od));
+  const periodZahtjeva = periodZaDatum(zahtjev.datum_od);
+  const g = granicePerioda(periodZahtjeva);
+  // Pravo na godišnji u tom periodu: 20 + dodatni dani iz korekcije (ako ih je admin upisao).
+  const { data: korekcija } = await supabase.from('odsustvo_korekcije').select('prenos')
+    .eq('korisnik_id', zahtjev.korisnik_id).eq('godina', periodZahtjeva).maybeSingle();
+  const pravo = GODISNJA_KVOTA + Number(korekcija?.prenos || 0);
   const { data: raniji } = await supabase.from('odsustva').select('id, datum_od')
     .eq('korisnik_id', zahtjev.korisnik_id).eq('tip', 'godisnji').eq('status', 'odobreno')
     .gte('datum_od', g.od).lte('datum_od', g.do);
@@ -171,7 +188,7 @@ export async function pripremiRjesenje(supabase, zahtjev, datum) {
     ucitajJmbg(supabase, zahtjev.korisnik_id),
     ucitajSlikeFirme(supabase).catch((e) => { console.warn('Pečat/potpis nisu učitani:', e.message); return {}; }),
   ]);
-  const pdf = napraviRjesenje({ zahtjev, profil: profil || {}, broj, datum: datumRjesenja, redni, jmbg, slike });
+  const pdf = napraviRjesenje({ zahtjev, profil: profil || {}, broj, datum: datumRjesenja, redni, jmbg, slike, pravo });
   return { broj, datum: datumRjesenja, pdf, naziv: nazivFajlaRjesenja(zahtjev, broj), nedostajuPodaci: !profil?.ime_prezime || !profil?.radno_mjesto, imaPecat: Boolean(slike.pecat && slike.potpis) };
 }
 
@@ -197,7 +214,7 @@ export async function podsjetnikPrenos(korisnik, stanje, adresa) {
     naslov: `Imaš ${stanje.preostalo} neiskorišćenih dana godišnjeg koji ističu ${formatirajDatum(stanje.istice)}`,
     sadrzaj: {
       naslov: 'Iskoristi preostale slobodne dane',
-      uvod: `Od godišnjeg odmora za period ${nazivPerioda(stanje.period)} ostalo ti je ${stanje.preostalo} dana. Važe do ${formatirajDatum(stanje.istice)}, a 1. jula dobijaš novih ${stanje.kvota}. Neiskorišćeni dani se ne prenose.`,
+      uvod: `Od godišnjeg odmora za period ${nazivPerioda(stanje.period)} ostalo ti je ${stanje.preostalo} dana. Važe do ${formatirajDatum(stanje.istice)}, a 1. jula dobijaš novih ${GODISNJA_KVOTA}. Neiskorišćeni dani se ne prenose.`,
       redovi: [
         ['Preostalo', String(stanje.preostalo)],
         ['Iskorišćeno', `${stanje.iskoristeno} od ${stanje.kvota}`],

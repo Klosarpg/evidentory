@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { ucitajMojeDozvole, DOZVOLE } from '@/lib/dozvole';
-import { SLAVE, NAZIVI_MJESECI, danasUCrnojGori, danUSedmici, formatirajDatum, formatirajSlavu, periodZaDatum, nazivPerioda, granicePerioda } from '@/lib/odsustvo';
+import { GODISNJA_KVOTA, SLAVE, NAZIVI_MJESECI, danasUCrnojGori, danUSedmici, formatirajDatum, formatirajSlavu, periodZaDatum, nazivPerioda, granicePerioda } from '@/lib/odsustvo';
 import { FOKUS, POLJE, DUGME, Ikona, Poruka, Potvrda, Sekcija } from '../_komponente/ui';
 import { dativImena } from '@/lib/dativ';
 
@@ -645,24 +645,40 @@ function SlavaForma({ profil, izvrsi }) {
 
 function KorekcijaForma({ korisnikId, period, postojeca, izvrsi }) {
   const [dana, setDana] = useState(String(postojeca?.dana ?? 0));
+  const [dodatno, setDodatno] = useState(String(postojeca?.prenos ?? 0));
+  const [napomena, setNapomena] = useState(postojeca?.napomena || '');
   const [slanje, setSlanje] = useState(false);
+  const pripada = GODISNJA_KVOTA + (Number(dodatno) || 0) - (Number(dana) || 0);
 
   const posalji = async (e) => {
     e.preventDefault();
     setSlanje(true);
     await izvrsi(
-      () => pozoviApi('/api/odsustvo', 'POST', { akcija: 'korekcija', korisnikId, godina: period, dana: Number(dana), prenos: 0 }),
-      'Umanjenje je sačuvano.'
+      () => pozoviApi('/api/odsustvo', 'POST', { akcija: 'korekcija', korisnikId, godina: period, dana: Number(dana), prenos: Number(dodatno), napomena }),
+      'Korekcija dana je sačuvana.'
     );
     setSlanje(false);
   };
 
   return (
-    <form onSubmit={posalji} className="space-y-4 max-w-xs">
+    <form onSubmit={posalji} className="grid grid-cols-1 md:grid-cols-2 gap-4">
       <Polje id={`kor-d-${korisnikId}`} label="Umanjenje dana" pomoc="Oduzima se od 20: dani iskorišćeni van aplikacije ili srazmjerno umanjenje za novog radnika.">
         <input id={`kor-d-${korisnikId}`} type="number" min={0} max={365} value={dana} onChange={(e) => setDana(e.target.value)} className={`${POLJE} tabular-nums`} />
       </Polje>
-      <button type="submit" disabled={slanje} className={DUGME.glavno}>{slanje ? 'Čuvanje…' : 'Sačuvaj umanjenje'}</button>
+      <Polje id={`kor-p-${korisnikId}`} label="Dodatni dani" pomoc="Dodaje se na 20, npr. po ugovoru ili stažu.">
+        <input id={`kor-p-${korisnikId}`} type="number" min={0} max={365} value={dodatno} onChange={(e) => setDodatno(e.target.value)} className={`${POLJE} tabular-nums`} />
+      </Polje>
+      <div className="md:col-span-2">
+        <Polje id={`kor-n-${korisnikId}`} label="Napomena (nije obavezno)" pomoc="Vidi je i zaposleni, uz stanje svojih dana. Npr. „5 dana iskorišćeno u julu, prije aplikacije“.">
+          <input id={`kor-n-${korisnikId}`} maxLength={200} value={napomena} onChange={(e) => setNapomena(e.target.value)} className={POLJE} />
+        </Polje>
+      </div>
+      <p className="md:col-span-2 text-sm text-slate-700">
+        Pripada u periodu {nazivPerioda(period)}: <strong className="tabular-nums">{pripada}</strong> dana ({GODISNJA_KVOTA}{Number(dodatno) ? ` + ${Number(dodatno)}` : ''}{Number(dana) ? ` − ${Number(dana)}` : ''}). Od 1. jula sledeće godine opet {GODISNJA_KVOTA}.
+      </p>
+      <div className="md:col-span-2">
+        <button type="submit" disabled={slanje} className={DUGME.glavno}>{slanje ? 'Čuvanje…' : 'Sačuvaj korekciju'}</button>
+      </div>
     </form>
   );
 }

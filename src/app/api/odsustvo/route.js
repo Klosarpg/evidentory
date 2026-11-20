@@ -219,7 +219,7 @@ async function obradi(supabase, ja, dozvole, t, adresa) {
         .eq('id', obradjen.id).select().single();
       if (saBrojem) obradjen = saBrojem;
       if (rjesenje.nedostajuPodaci) {
-        upozorenja.push(`Za ${obradjen.korisnik_ime} nisu upisani ime i prezime ili radno mjesto, pa rješenje ima prazna mjesta. Upiši ih u "Svi korisnici" → Detalji.`);
+        upozorenja.push(`Za ${obradjen.korisnik_ime} nisu upisani ime i prezime ili radno mjesto, pa rješenje ima prazna mjesta. Upiši ih u Administracija → Korisnici.`);
       }
     } catch (e) {
       console.error('Rješenje nije napravljeno:', e);
@@ -259,7 +259,7 @@ async function postaviKorekciju(supabase, dozvole, t) {
   if (!korisnikId) return greska('Izaberi korisnika.');
   if (!Number.isInteger(godina) || godina < 2020 || godina > 2100) return greska('Godina nije ispravna.');
   if (!Number.isInteger(dana) || dana < 0 || dana > 365) return greska('Iskorišćeni dani moraju biti cijeli broj od 0 do 365.');
-  if (!Number.isInteger(prenos) || prenos < 0 || prenos > 365) return greska('Preneseni dani moraju biti cijeli broj od 0 do 365.');
+  if (!Number.isInteger(prenos) || prenos < 0 || prenos > 365) return greska('Dodatni dani moraju biti cijeli broj od 0 do 365.');
 
   const { error } = await supabase.from('odsustvo_korekcije').upsert(
     { korisnik_id: korisnikId, godina, dana, prenos, napomena: String(t.napomena || '').trim().slice(0, 200) || null },
