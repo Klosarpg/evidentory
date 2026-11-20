@@ -70,7 +70,7 @@ export default function Administracija() {
 
   const danas = danasUCrnojGori();
   const godina = Number(danas.slice(0, 4));
-  const period = periodZaDatum(danas); // tekući period godišnjeg (1. 7. – 30. 6.)
+  const period = periodZaDatum(danas); // tekuća godina godišnjeg odmora
 
   const ucitaj = useCallback(async () => {
     const mojeDozvole = await ucitajMojeDozvole(supabase);
@@ -401,7 +401,7 @@ function ProfilKorisnika({ profil, ja, podaci, period, izvrsi, potvrdi, izaberi 
         <Blok naslov="Slava" opis="Taj dan je svake godine slobodan i ne troši godišnji; 5 dana ranije stiže podsjetnik.">
           <SlavaForma profil={profil} izvrsi={izvrsi} />
         </Blok>
-        <Blok naslov={`Slobodni dani ${nazivPerioda(period)}`} opis={`Period ${formatirajDatum(granicePerioda(period).od)} – ${formatirajDatum(granicePerioda(period).do)}. Svako dobija 20 dana.`}>
+        <Blok naslov={`Slobodni dani za ${nazivPerioda(period)} godinu`} opis={`Svako dobija 20 dana 1. januara ${period}. Neiskorišćeni dani iz ${period - 1}. troše se prvi i važe do 30. 6. ${period}.`}>
           <KorekcijaForma korisnikId={profil.id} period={period} postojeca={podaci.korekcije.find((k) => k.korisnik_id === profil.id && k.godina === period)} izvrsi={izvrsi} />
         </Blok>
         {!jaSam && (
@@ -674,7 +674,7 @@ function KorekcijaForma({ korisnikId, period, postojeca, izvrsi }) {
         </Polje>
       </div>
       <p className="md:col-span-2 text-sm text-slate-700">
-        Pripada u periodu {nazivPerioda(period)}: <strong className="tabular-nums">{pripada}</strong> dana ({GODISNJA_KVOTA}{Number(dodatno) ? ` + ${Number(dodatno)}` : ''}{Number(dana) ? ` − ${Number(dana)}` : ''}). Od 1. jula sledeće godine opet {GODISNJA_KVOTA}.
+        Pripada za {nazivPerioda(period)} godinu: <strong className="tabular-nums">{pripada}</strong> dana ({GODISNJA_KVOTA}{Number(dodatno) ? ` + ${Number(dodatno)}` : ''}{Number(dana) ? ` − ${Number(dana)}` : ''}). Što od toga ostane neiskorišćeno, prenosi se u {period + 1}. i važi do 30. 6. {period + 1}.
       </p>
       <div className="md:col-span-2">
         <button type="submit" disabled={slanje} className={DUGME.glavno}>{slanje ? 'Čuvanje…' : 'Sačuvaj korekciju'}</button>

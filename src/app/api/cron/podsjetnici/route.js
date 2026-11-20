@@ -5,7 +5,7 @@ import { adresaAplikacije, podsjetnikSlava, podsjetnikPrenos } from '@/lib/obavj
 
 // Dnevni podsjetnici (Vercel Cron, vidi vercel.json):
 //  - 5 dana prije slave: podsjetnik korisniku
-//  - 30. decembra (6 mjeseci prije isteka perioda 30. juna): ko ima neiskorišćene dane
+//  - 30. decembra (6 mjeseci prije isteka 30. juna): ko ima neiskorišćene dane tekuće godine
 // Ručni test: /api/cron/podsjetnici?danas=2026-12-30 (sa Authorization: Bearer CRON_SECRET)
 
 export async function GET(request) {
@@ -36,7 +36,7 @@ export async function GET(request) {
       izvjestaj.slava++;
     }
 
-    // 2) 30. decembar: neiskorišćeni dani tekućeg perioda ističu 30. juna
+    // 2) 30. decembar: neiskorišćeni dani tekuće godine ističu 30. juna sledeće
     if (danas.slice(5) === '12-30') {
       const { data: praznici } = await supabase.from('praznici').select('datum, naziv');
       const mapaPraznika = new Map((praznici || []).map((x) => [x.datum, x.naziv]));

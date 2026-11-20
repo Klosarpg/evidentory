@@ -94,7 +94,7 @@ export default function Odsustvo() {
   const [poruka, setPoruka] = useState(null); // { tip: 'uspjeh' | 'greska', tekst, upozorenja? }
 
   const danas = danasUCrnojGori();
-  const godina = periodZaDatum(danas); // tekući period godišnjeg (1. 7. – 30. 6.), označen godinom početka
+  const godina = periodZaDatum(danas); // tekuća godina; preneseni dani iz prošle važe do 30. 6.
 
   const ucitaj = useCallback(async () => {
     const mojeDozvole = await ucitajMojeDozvole(supabase);
@@ -374,10 +374,12 @@ function MojiDani({ ja, praznici, odsustva, profili, korekcije, danas, godina, a
 
 function StanjePregled({ stanje, godina, napomena }) {
   const stavke = [
-    { naziv: 'Pripada', vrijednost: stanje.kvota, opis: stanje.dodatno ? `za period ${nazivPerioda(godina)}, od toga ${stanje.dodatno} dodatno` : `za period ${nazivPerioda(godina)}` },
+    { naziv: 'Pripada', vrijednost: stanje.kvota, opis: stanje.dodatno ? `za ${nazivPerioda(godina)} godinu, od toga ${stanje.dodatno} dodatno` : `za ${nazivPerioda(godina)} godinu` },
     { naziv: 'Iskorišćeno', vrijednost: stanje.iskoristeno, opis: stanje.umanjenje ? `od toga ${stanje.umanjenje} van aplikacije` : 'odobreni zahtjevi' },
     { naziv: 'Na čekanju', vrijednost: stanje.naCekanju, opis: stanje.naCekanju ? 'čeka odobrenje' : 'nema zahtjeva' },
-    { naziv: 'Ističe', vrijednost: formatirajDatum(stanje.istice), opis: 'neiskorišćeni dani propadaju', datum: true },
+    stanje.preneseno > 0
+      ? { naziv: 'Preneseni ističu', vrijednost: formatirajDatum(stanje.prenosIstice), opis: `${stanje.preneseno} iz ${nazivPerioda(godina - 1)} godine, troše se prvi`, datum: true }
+      : { naziv: 'Neiskorišćeni važe do', vrijednost: formatirajDatum(stanje.istice), opis: `prenose se u ${nazivPerioda(godina + 1)} i troše se prvi`, datum: true },
   ];
 
   return (
@@ -390,6 +392,7 @@ function StanjePregled({ stanje, godina, napomena }) {
             <span className="text-sm text-slate-600">{stanje.preostalo === 1 ? 'dan' : 'dana'}</span>
           </p>
           <p className="mt-1 text-sm text-slate-600">
+            {stanje.preneseno > 0 && <>{stanje.preostaloOveGodine} za {nazivPerioda(godina)} + {stanje.preneseno} iz {nazivPerioda(godina - 1)}<br /></>}
             {stanje.naCekanju > 0 ? `${stanje.dostupno} slobodno za nove zahtjeve` : 'Sve je slobodno za nove zahtjeve.'}
           </p>
         </div>
@@ -410,7 +413,7 @@ function StanjePregled({ stanje, godina, napomena }) {
       )}
       {stanje.prekoracenje > 0 && (
         <p className="px-6 py-3 border-t border-slate-200 text-sm text-red-800 bg-red-50 rounded-b-2xl">
-          Odobreno je {stanje.prekoracenje} {stanje.prekoracenje === 1 ? 'dan' : 'dana'} više nego što pripada za ovaj period.
+          Odobreno je {stanje.prekoracenje} {stanje.prekoracenje === 1 ? 'dan' : 'dana'} više nego što pripada za ovu godinu.
         </p>
       )}
     </section>
@@ -791,7 +794,7 @@ function SviKorisnici({ ja, praznici, odsustva, profili, korekcije, danas, godin
   return (
     <div className="bg-white border border-slate-200 rounded-2xl p-5">
       <div className="flex flex-wrap items-end justify-between gap-3 mb-4">
-        <h2 className="text-base font-bold text-slate-900">Slobodni dani svih korisnika, period {nazivPerioda(godina)}</h2>
+        <h2 className="text-base font-bold text-slate-900">Slobodni dani svih korisnika za {nazivPerioda(godina)} godinu</h2>
         <div>
           <label htmlFor="pretraga-korisnika" className="sr-only">Pretraga korisnika</label>
           <input id="pretraga-korisnika" type="search" placeholder="Pretraži korisnika…" value={pretraga} onChange={(e) => setPretraga(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-500" />

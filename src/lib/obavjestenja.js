@@ -207,14 +207,14 @@ export async function podsjetnikSlava(korisnik, datumSlave, adresa) {
   return upozorenje(r, korisnik.kontakt_email);
 }
 
-// Podsjetnik 30. decembra, 6 mjeseci prije isteka perioda (30. juna): neiskorišćeni dani propadaju.
+// Podsjetnik 30. decembra, 6 mjeseci prije isteka (30. juna sledeće godine): neiskorišćeni dani tada propadaju.
 export async function podsjetnikPrenos(korisnik, stanje, adresa) {
   const r = await posaljiEmail({
     prima: korisnik.kontakt_email,
     naslov: `Imaš ${stanje.preostalo} neiskorišćenih dana godišnjeg koji ističu ${formatirajDatum(stanje.istice)}`,
     sadrzaj: {
       naslov: 'Iskoristi preostale slobodne dane',
-      uvod: `Od godišnjeg odmora za period ${nazivPerioda(stanje.period)} ostalo ti je ${stanje.preostalo} dana. Važe do ${formatirajDatum(stanje.istice)}, a 1. jula dobijaš novih ${GODISNJA_KVOTA}. Neiskorišćeni dani se ne prenose.`,
+      uvod: `Od godišnjeg odmora za ${nazivPerioda(stanje.period)} godinu ostalo ti je ${stanje.preostalo} dana. Možeš ih koristiti do ${formatirajDatum(stanje.istice)} i troše se prije novih ${GODISNJA_KVOTA} koje dobijaš 1. januara. Poslije toga propadaju.`,
       redovi: [
         ['Preostalo', String(stanje.preostalo)],
         ['Iskorišćeno', `${stanje.iskoristeno} od ${stanje.kvota}`],

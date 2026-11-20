@@ -2,9 +2,12 @@
 // Datumi su stringovi 'YYYY-MM-DD'; računamo u UTC da vremenska zona ne pomjera dane.
 
 export const GODISNJA_KVOTA = 20;
-// Period godišnjeg odmora: od 1. jula do 30. juna. Svakog 1. jula 20 novih dana; neiskorišćeni ističu 30. juna.
-export const POCETAK_PERIODA = '07-01';
-export const KRAJ_PERIODA = '06-30';
+// Godišnji odmor ide po kalendarskoj godini: svakog 1. januara 20 novih dana.
+// Neiskorišćeni dani iz prethodne godine mogu se koristiti do 30. juna i troše se PRVI.
+export const POCETAK_PERIODA = '01-01';
+export const KRAJ_PERIODA = '06-30'; // do kada važe preneseni dani iz prethodne godine
+// Prva godina koju aplikacija vodi. Za ranije godine nema dana (pa ni prenosa), osim ako admin upiše korekciju za tu godinu.
+export const PRVA_GODINA = 2026;
 export const MAKS_DANA_ZAHTJEVA = 90; // najduži raspon jednog zahtjeva (kalendarskih dana)
 
 export const TIPOVI = {
@@ -110,77 +113,107 @@ export function radniDani(od, doDatuma, praznici, slava) {
 
 // ---------- Period i stanje dana ----------
 
-// Period se označava godinom u kojoj počinje: period 2026 = 1. 7. 2026 – 30. 6. 2027.
+// Period = kalendarska godina. Dani godine 2026 važe od 1. 1. 2026. do 30. 6. 2027.
 export function periodZaDatum(datum) {
-  const g = Number(datum.slice(0, 4));
-  return datum.slice(5) >= POCETAK_PERIODA ? g : g - 1;
+  return Number(datum.slice(0, 4));
 }
 
 export function granicePerioda(period) {
   return { od: `${period}-${POCETAK_PERIODA}`, do: `${period + 1}-${KRAJ_PERIODA}` };
 }
 
-// "2026/27"
+// "2026."
 export function nazivPerioda(period) {
-  return `${period}/${String(period + 1).slice(2)}`;
+  return `${period}.`;
 }
 
-// Stanje godišnjeg za jedan period (bez prenosa: svaki period ima svojih 20 dana).
-// odsustva: [{ tip, status, datum_od, datum_do }]  (računaju se odobrena; sa saNaCekanju i ona na čekanju)
-// korekcije: [{ godina, dana, prenos }]  godina = period; dana = umanjenje (iskorišćeno van aplikacije ili srazmjerno ugovoru);
-//   prenos = dodatni dani preko 20 u tom periodu (kolona se zove "prenos" iz ranije verzije, sada znači "dodatno").
-// period: godina početka perioda. ukupnoPrekoracenje sabira prekoračenja u svim periodima (za provjeru zahtjeva).
-export function izracunajStanje({ odsustva = [], korekcije = [], praznici, slava, period, saNaCekanju = false }) {
+// Raspoređuje dane odmora po godinama kojima pripadaju. Svaki radni dan odmora (redom po datumu) troši:
+//  1) preostale dane prethodne godine, ako je dan najkasnije 30. juna,
+//  2) inače dane svoje godine,
+//  3) ako ni toga nema, to je prekoračenje te godine.
+// korekcije: [{ godina, dana, prenos }]; dana = umanjenje (iskorišćeno van aplikacije ili srazmjerno ugovoru) i troši
+//   dane te godine; prenos = dodatni dani preko 20 te godine (kolona se zove "prenos" iz ranije verzije, sada znači "dodatno").
+function rasporedi({ odsustva, korekcije, praznici, slava, saNaCekanju }) {
   const statusi = saNaCekanju ? ['odobreno', 'na_cekanju'] : ['odobreno'];
-  const daniPoPeriodu = {};
+  const dani = [];
   for (const o of odsustva) {
     if (o.tip !== 'godisnji' || !statusi.includes(o.status)) continue;
-    for (const d of radniDani(o.datum_od, o.datum_do, praznici, slava)) {
-      const p = periodZaDatum(d);
-      daniPoPeriodu[p] = (daniPoPeriodu[p] || 0) + 1;
-    }
+    dani.push(...radniDani(o.datum_od, o.datum_do, praznici, slava));
   }
+  dani.sort();
+
   const umanjenje = {};
   const dodatno = {};
   for (const k of korekcije) {
     umanjenje[k.godina] = (umanjenje[k.godina] || 0) + Number(k.dana || 0);
     dodatno[k.godina] = (dodatno[k.godina] || 0) + Number(k.prenos || 0);
   }
-  const kvotaPerioda = (p) => GODISNJA_KVOTA + (dodatno[p] || 0);
+  const imaKorekciju = new Set(korekcije.map((k) => Number(k.godina)));
+  const kvota = (g) => (g >= PRVA_GODINA || imaKorekciju.has(g) ? GODISNJA_KVOTA + (dodatno[g] || 0) : 0);
 
-  const stanjePerioda = (p) => {
-    const iskoristeno = (daniPoPeriodu[p] || 0) + (umanjenje[p] || 0);
-    const kvota = kvotaPerioda(p);
-    return { iskoristeno, preostalo: Math.max(0, kvota - iskoristeno), prekoracenje: Math.max(0, iskoristeno - kvota) };
+  const preostalo = {}; // godina → koliko je još ostalo
+  const potroseno = {}; // godina → dana odmora iz aplikacije koji su potrošili tu godinu
+  const prekoracenje = {}; // godina (datuma odmora) → dana bez pokrića
+  const ostalo = (g) => {
+    if (!(g in preostalo)) preostalo[g] = kvota(g) - (umanjenje[g] || 0);
+    return preostalo[g];
   };
 
-  const periodi = new Set([period, ...Object.keys(daniPoPeriodu).map(Number), ...Object.keys(umanjenje).map(Number)]);
-  let ukupnoPrekoracenje = 0;
-  for (const p of periodi) ukupnoPrekoracenje += stanjePerioda(p).prekoracenje;
+  for (const d of dani) {
+    const g = periodZaDatum(d);
+    if (d.slice(5) <= KRAJ_PERIODA && ostalo(g - 1) > 0) {
+      preostalo[g - 1]--;
+      potroseno[g - 1] = (potroseno[g - 1] || 0) + 1;
+    } else if (ostalo(g) > 0) {
+      preostalo[g]--;
+      potroseno[g] = (potroseno[g] || 0) + 1;
+    } else {
+      prekoracenje[g] = (prekoracenje[g] || 0) + 1;
+    }
+  }
 
-  const s = stanjePerioda(period);
+  const godine = new Set([...Object.keys(umanjenje), ...Object.keys(preostalo)].map(Number));
+  let ukupnoPrekoracenje = Object.values(prekoracenje).reduce((a, b) => a + b, 0);
+  for (const g of godine) ukupnoPrekoracenje += Math.max(0, -ostalo(g)); // umanjenje veće od kvote
+
+  return { kvota, umanjenje, dodatno, ostalo, potroseno, prekoracenje, ukupnoPrekoracenje };
+}
+
+// Stanje godišnjeg za jednu godinu (period).
+// odsustva: [{ tip, status, datum_od, datum_do }]  (računaju se odobrena; sa saNaCekanju i ona na čekanju)
+// danas: ako je zadat i najkasnije 30. jun, preostali dani prethodne godine se prikazuju kao "preneseno".
+// ukupnoPrekoracenje sabira prekoračenja u svim godinama (za provjeru zahtjeva).
+export function izracunajStanje({ odsustva = [], korekcije = [], praznici, slava, period, saNaCekanju = false, danas = null }) {
+  const r = rasporedi({ odsustva, korekcije, praznici, slava, saNaCekanju });
   const g = granicePerioda(period);
+  const ove = Math.max(0, r.ostalo(period));
+  const prenosVazi = Boolean(danas) && danas <= `${period}-${KRAJ_PERIODA}`;
+  const preneseno = prenosVazi ? Math.max(0, r.ostalo(period - 1)) : 0;
   return {
     period,
-    kvota: kvotaPerioda(period),
-    dodatno: dodatno[period] || 0,
-    umanjenje: umanjenje[period] || 0,
-    iskoristeno: s.iskoristeno,
-    preostalo: s.preostalo,
-    prekoracenje: s.prekoracenje,
+    kvota: r.kvota(period),
+    dodatno: r.dodatno[period] || 0,
+    umanjenje: r.umanjenje[period] || 0,
+    iskoristeno: (r.potroseno[period] || 0) + (r.umanjenje[period] || 0),
+    preostaloOveGodine: ove,
+    preneseno, // preostali dani prethodne godine koji još važe
+    prenosIstice: `${period}-${KRAJ_PERIODA}`,
+    preostalo: ove + preneseno,
+    prekoracenje: (r.prekoracenje[period] || 0) + Math.max(0, -r.ostalo(period)),
     pocetak: g.od,
     istice: g.do,
-    ukupnoPrekoracenje,
+    ukupnoPrekoracenje: r.ukupnoPrekoracenje,
   };
 }
 
 // Puno stanje za prikaz: odobreno + koliko je na čekanju + koliko je još slobodno za nove zahtjeve.
-export function stanjeKorisnika({ odsustva, korekcije, praznici, slava, period }) {
-  const odobreno = izracunajStanje({ odsustva, korekcije, praznici, slava, period });
-  const saCekanjem = izracunajStanje({ odsustva, korekcije, praznici, slava, period, saNaCekanju: true });
+// danas: podrazumijevano današnji datum u Crnoj Gori (za preneseni dio do 30. juna).
+export function stanjeKorisnika({ odsustva, korekcije, praznici, slava, period, danas = danasUCrnojGori() }) {
+  const odobreno = izracunajStanje({ odsustva, korekcije, praznici, slava, period, danas });
+  const saCekanjem = izracunajStanje({ odsustva, korekcije, praznici, slava, period, danas, saNaCekanju: true });
   return {
     ...odobreno,
-    naCekanju: saCekanjem.iskoristeno - odobreno.iskoristeno,
+    naCekanju: odobreno.preostalo - saCekanjem.preostalo,
     dostupno: saCekanjem.preostalo,
   };
 }
