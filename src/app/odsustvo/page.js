@@ -90,6 +90,7 @@ export default function Odsustvo() {
   const [odsustva, setOdsustva] = useState([]);
   const [profili, setProfili] = useState([]);
   const [korekcije, setKorekcije] = useState([]);
+  const [projekti, setProjekti] = useState([]);
   const [tab, setTab] = useState(null);
   const [poruka, setPoruka] = useState(null); // { tip: 'uspjeh' | 'greska', tekst, upozorenja? }
 
@@ -100,7 +101,7 @@ export default function Odsustvo() {
     const mojeDozvole = await ucitajMojeDozvole(supabase);
     if (!mojeDozvole) return router.replace('/');
     const d = mojeDozvole.dozvole;
-    if (!d.some((x) => x.startsWith('odsustvo_'))) return router.replace('/pocetna');
+    if (!d.some((x) => x.startsWith('odsustvo_') || x === 'projekti_unos')) return router.replace('/pocetna');
     setJa(mojeDozvole);
 
     const vidiSve = d.includes('odsustvo_pregled_svih') || d.includes('odsustvo_odobravanje');
@@ -109,11 +110,12 @@ export default function Odsustvo() {
     const upitOdsustva = supabase.from('odsustva').select('*').order('datum_od', { ascending: false });
     const upitKorekcije = supabase.from('odsustvo_korekcije').select('*');
     const upitProfili = supabase.from('profili').select('*').order('email');
-    const [p, o, k, pr] = await Promise.all([
+    const [p, o, k, pr, pj] = await Promise.all([
       supabase.from('praznici').select('datum, naziv'),
       vidiSve ? upitOdsustva : upitOdsustva.eq('korisnik_id', id),
       vidiSve ? upitKorekcije : upitKorekcije.eq('korisnik_id', id),
       vidiSve ? upitProfili : upitProfili.eq('id', id),
+      supabase.from('projekti').select('*').order('datum_od'),
     ]);
     const prva = [p, o, k, pr].find((r) => r.error);
     if (prva) {
@@ -127,7 +129,9 @@ export default function Odsustvo() {
     setOdsustva(o.data || []);
     setKorekcije(k.data || []);
     setProfili(pr.data || []);
-    setTab((t) => t || (d.includes('odsustvo_zahtjev') ? 'moji' : d.includes('odsustvo_odobravanje') ? 'odobravanje' : 'svi'));
+    // Projekti su dodatak: ako SQL "projekti.sql" još nije pokrenut, stranica radi bez njih.
+    setProjekti(pj.error ? [] : pj.data || []);
+    setTab((t) => t || (d.includes('odsustvo_zahtjev') ? 'moji' : d.includes('odsustvo_odobravanje') ? 'odobravanje' : d.includes('odsustvo_pregled_svih') ? 'svi' : 'projekti'));
   }, [router]);
 
   useEffect(() => { ucitaj(); }, [ucitaj]);
@@ -166,10 +170,11 @@ export default function Odsustvo() {
     d.includes('odsustvo_zahtjev') && { kljuc: 'moji', naziv: 'Moji slobodni dani' },
     d.includes('odsustvo_odobravanje') && { kljuc: 'odobravanje', naziv: 'Na odobravanju', broj: naCekanju.length },
     d.includes('odsustvo_pregled_svih') && { kljuc: 'svi', naziv: 'Svi korisnici' },
+    (d.includes('projekti_unos') || d.includes('admin')) && { kljuc: 'projekti', naziv: 'Projekti' },
   ].filter(Boolean);
 
   const javiGresku = (tekst) => setPoruka({ tip: 'greska', tekst });
-  const zajedno = { ja, praznici, odsustva, profili, korekcije, danas, godina, akcija, javiGresku };
+  const zajedno = { ja, praznici, odsustva, profili, korekcije, projekti, danas, godina, akcija, javiGresku };
 
   return (
     <Okvir ja={ja}>
@@ -195,6 +200,7 @@ export default function Odsustvo() {
       {tab === 'moji' && <MojiDani {...zajedno} />}
       {tab === 'odobravanje' && <Odobravanje {...zajedno} />}
       {tab === 'svi' && <SviKorisnici {...zajedno} />}
+      {tab === 'projekti' && <Projekti projekti={projekti} danas={danas} osvjezi={ucitaj} javi={setPoruka} />}
     </Okvir>
   );
 }
@@ -249,7 +255,7 @@ function Okvir({ ja, children }) {
 
 // ================= Moji slobodni dani =================
 
-function MojiDani({ ja, praznici, odsustva, profili, korekcije, danas, godina, akcija, javiGresku }) {
+function MojiDani({ ja, praznici, odsustva, profili, korekcije, projekti, danas, godina, akcija, javiGresku }) {
   const mojProfil = profili.find((p) => p.id === ja.user.id) || {};
   const slava = mojProfil.slava_datum || null;
   const moja = odsustva.filter((o) => o.korisnik_id === ja.user.id);
@@ -310,6 +316,7 @@ function MojiDani({ ja, praznici, odsustva, profili, korekcije, danas, godina, a
             praznici={praznici}
             slava={slava}
             odsustva={aktivna}
+            projekti={projekti}
             odabir={odabir}
             onKlik={klikNaDan}
             danas={danas}
@@ -424,8 +431,11 @@ function StanjePregled({ stanje, godina, napomena }) {
 
 const DANI_SEDMICE = ['Pon', 'Uto', 'Sri', 'Čet', 'Pet', 'Sub', 'Ned'];
 
-function Kalendar({ mjesec, setMjesec, praznici, slava, odsustva, odabir, onKlik, danas }) {
+function Kalendar({ mjesec, setMjesec, praznici, slava, odsustva, projekti = [], odabir, onKlik, danas }) {
   const [lebdi, setLebdi] = useState(null);
+  const [kliknut, setKliknut] = useState(null); // dan za koji se ispod kalendara prikazuju projekti
+  const projektiNa = (datum) => projekti.filter((p) => p.datum_od <= datum && datum <= p.datum_do);
+  const projektiKliknutog = kliknut ? projektiNa(kliknut) : [];
   const [g, m] = mjesec.split('-').map(Number);
   const prvi = `${mjesec}-01`;
   const brojDana = new Date(Date.UTC(g, m, 0)).getUTCDate();
@@ -461,6 +471,7 @@ function Kalendar({ mjesec, setMjesec, praznici, slava, odsustva, odabir, onKlik
           if (!datum) return <div key={`p${i}`} />;
           const vrsta = vrstaDana(datum, praznici, slava);
           const zahtjev = odsustva.find((o) => o.datum_od <= datum && datum <= o.datum_do);
+          const naProjektu = projektiNa(datum);
           const prosao = datum < danas;
           const krajnji = datum === odabir.od || datum === kraj;
           const uOdabiru = odabir.od && datum > odabir.od && datum < kraj;
@@ -480,28 +491,49 @@ function Kalendar({ mjesec, setMjesec, praznici, slava, odsustva, odabir, onKlik
           if (uOdabiru) stil = birakraj ? 'bg-blue-50 text-blue-900 border border-dashed border-blue-300' : 'bg-blue-100 text-blue-900 border border-blue-200';
           if (krajnji) stil = 'bg-blue-600 text-white border border-blue-600';
           if (prosao && !zahtjev) stil += ' opacity-40';
+          const opisProjekta = naProjektu.length ? `projekat: ${naProjektu.map((p) => p.naziv).join(', ')}` : '';
+          const sviOpisi = [opis, opisProjekta].filter(Boolean).join('; ');
 
           return (
             <button
               key={datum}
               type="button"
               disabled={prosao}
-              onClick={() => onKlik(datum)}
+              onClick={() => { onKlik(datum); setKliknut(datum); }}
               onMouseEnter={() => setLebdi(datum)}
               onFocus={() => setLebdi(datum)}
               aria-pressed={krajnji || uOdabiru}
-              aria-label={`${formatirajDatum(datum)}${opis ? `, ${opis}` : ''}${datum === danas ? ', danas' : ''}`}
-              title={opis || undefined}
+              aria-label={`${formatirajDatum(datum)}${sviOpisi ? `, ${sviOpisi}` : ''}${datum === danas ? ', danas' : ''}`}
+              title={sviOpisi || undefined}
               className={`relative h-12 rounded-lg text-sm font-semibold tabular-nums transition-colors duration-150 disabled:cursor-not-allowed ${FOKUS} ${stil}`}
             >
               {Number(datum.slice(8))}
               {vrsta.razlog === 'praznik' && !zahtjev && <span className="absolute bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-red-500" aria-hidden="true" />}
               {vrsta.razlog === 'slava' && !zahtjev && <span className="absolute bottom-1 left-1/2 -translate-x-1/2 text-red-600"><Ikona ime="slava" puna className="w-2.5 h-2.5" /></span>}
               {datum === danas && !krajnji && <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-blue-600" aria-hidden="true" />}
+              {naProjektu.length > 0 && <span className={`absolute top-0.5 left-1 text-[10px] font-bold leading-none ${krajnji ? 'text-white' : 'text-violet-700'}`} aria-hidden="true">P</span>}
             </button>
           );
         })}
       </div>
+
+      {projektiKliknutog.length > 0 && (
+        <div role="status" className="mt-4 rounded-lg border border-violet-200 bg-violet-50 px-4 py-3 text-sm text-violet-950">
+          <div className="flex items-start justify-between gap-3">
+            <p className="font-semibold">{formatirajDatum(kliknut)}: zakazan{projektiKliknutog.length > 1 ? 'i su projekti' : ' je projekat'}</p>
+            <button type="button" onClick={() => setKliknut(null)} className={`p-1 -m-1 rounded-md opacity-70 hover:opacity-100 ${FOKUS}`} aria-label="Zatvori opis projekta"><Ikona ime="zatvori" /></button>
+          </div>
+          <ul className="mt-2 space-y-2">
+            {projektiKliknutog.map((p) => (
+              <li key={p.id}>
+                <p><strong>{p.naziv}</strong> <span className="text-violet-800">({p.datum_od === p.datum_do ? formatirajDatum(p.datum_od) : `${formatirajDatum(p.datum_od)} – ${formatirajDatum(p.datum_do)}`})</span></p>
+                {p.opis && <p className="mt-0.5 whitespace-pre-line">{p.opis}</p>}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-xs text-violet-800">Slobodne dane i dalje možeš zakazati; ovo je samo informacija.</p>
+        </div>
+      )}
 
       <ul className="flex flex-wrap gap-x-4 gap-y-1 mt-4 text-xs text-slate-700">
         <li className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-green-100 border border-green-300" /> Odobreno</li>
@@ -509,7 +541,135 @@ function Kalendar({ mjesec, setMjesec, praznici, slava, odsustva, odabir, onKlik
         <li className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-slate-100" /> Vikend / praznik</li>
         <li className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-red-500" /> Praznik</li>
         <li className="flex items-center gap-1.5"><span className="text-red-600"><Ikona ime="slava" puna className="w-2.5 h-2.5" /></span> Slava</li>
+        {projekti.length > 0 && <li className="flex items-center gap-1.5"><span className="text-[10px] font-bold text-violet-700">P</span> Projekat (klikni dan za opis)</li>}
       </ul>
+    </div>
+  );
+}
+
+// ================= Projekti =================
+
+// Unos projekata (dozvola "projekti_unos" ili admin). Upisuje se direktno u tabelu; pravo provjerava baza (RLS).
+function Projekti({ projekti, danas, osvjezi, javi }) {
+  const prazno = { id: null, naziv: '', opis: '', datum_od: '', datum_do: '' };
+  const [forma, setForma] = useState(prazno);
+  const [slanje, setSlanje] = useState(false);
+  const [brise, setBrise] = useState(null); // id projekta koji čeka potvrdu brisanja
+  const [prikaziStare, setPrikaziStare] = useState(false);
+
+  const postavi = (polje) => (e) => setForma((f) => ({ ...f, [polje]: e.target.value }));
+  const prevedi = (m) => (/(does not exist|schema cache|not find)/i.test(m)
+    ? 'Tabela za projekte ne postoji. Pokreni SQL "projekti.sql" u Supabase-u.'
+    : /row-level security|permission/i.test(m) ? 'Nemaš dozvolu za unos projekata.' : m);
+
+  const sacuvaj = async (e) => {
+    e.preventDefault();
+    const kraj = forma.datum_do || forma.datum_od;
+    if (!forma.naziv.trim() || !forma.datum_od) return javi({ tip: 'greska', tekst: 'Upiši naziv i datum početka projekta.' });
+    if (kraj < forma.datum_od) return javi({ tip: 'greska', tekst: 'Kraj projekta ne može biti prije početka.' });
+    setSlanje(true);
+    const red = { naziv: forma.naziv.trim(), opis: forma.opis.trim() || null, datum_od: forma.datum_od, datum_do: kraj };
+    const { error } = forma.id
+      ? await supabase.from('projekti').update(red).eq('id', forma.id)
+      : await supabase.from('projekti').insert(red);
+    setSlanje(false);
+    if (error) return javi({ tip: 'greska', tekst: `Projekat nije sačuvan: ${prevedi(error.message)}` });
+    javi({ tip: 'uspjeh', tekst: forma.id ? 'Projekat je izmijenjen.' : 'Projekat je dodat u kalendar.' });
+    setForma(prazno);
+    osvjezi();
+  };
+
+  const obrisi = async (id) => {
+    const { error } = await supabase.from('projekti').delete().eq('id', id);
+    setBrise(null);
+    if (error) return javi({ tip: 'greska', tekst: `Projekat nije obrisan: ${prevedi(error.message)}` });
+    javi({ tip: 'uspjeh', tekst: 'Projekat je obrisan.' });
+    if (forma.id === id) setForma(prazno);
+    osvjezi();
+  };
+
+  const aktuelni = projekti.filter((p) => p.datum_do >= danas);
+  const prosli = projekti.filter((p) => p.datum_do < danas).reverse();
+  const lista = prikaziStare ? [...aktuelni, ...prosli] : aktuelni;
+  const polje = `w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-500`;
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_340px] gap-6">
+      <section aria-labelledby="naslov-projekti" className="bg-white border border-slate-200 rounded-2xl p-5">
+        <div className="flex flex-wrap items-end justify-between gap-3 mb-4">
+          <div>
+            <h2 id="naslov-projekti" className="text-base font-bold text-slate-900">Projekti u kalendaru</h2>
+            <p className="text-sm text-slate-600 mt-0.5">Zaposleni ih vide kao slovo P u kalendaru slobodnih dana. Ne brane zakazivanje odmora.</p>
+          </div>
+          {prosli.length > 0 && (
+            <button type="button" onClick={() => setPrikaziStare((x) => !x)} className={`text-sm font-semibold text-blue-700 hover:underline ${FOKUS}`}>
+              {prikaziStare ? 'Sakrij završene' : `Prikaži i završene (${prosli.length})`}
+            </button>
+          )}
+        </div>
+        {lista.length === 0 ? (
+          <p className="text-sm text-slate-600">Nema zakazanih projekata. Dodaj prvi u formi desno.</p>
+        ) : (
+          <ul className="divide-y divide-slate-100">
+            {lista.map((p) => (
+              <li key={p.id} className={`py-3 flex flex-wrap items-start justify-between gap-3 ${p.datum_do < danas ? 'opacity-60' : ''}`}>
+                <div className="min-w-0">
+                  <p className="font-semibold text-slate-900">{p.naziv}</p>
+                  <p className="text-sm text-slate-700 tabular-nums">{p.datum_od === p.datum_do ? formatirajDatum(p.datum_od) : `${formatirajDatum(p.datum_od)} – ${formatirajDatum(p.datum_do)}`}</p>
+                  {p.opis && <p className="text-sm text-slate-600 mt-0.5 whitespace-pre-line">{p.opis}</p>}
+                </div>
+                <div className="flex items-center gap-3 text-sm">
+                  {brise === p.id ? (
+                    <>
+                      <span className="text-slate-700">Obrisati?</span>
+                      <button type="button" onClick={() => obrisi(p.id)} className={`font-semibold text-red-700 hover:underline ${FOKUS}`}>Da, obriši</button>
+                      <button type="button" onClick={() => setBrise(null)} className={`font-semibold text-slate-700 hover:underline ${FOKUS}`}>Odustani</button>
+                    </>
+                  ) : (
+                    <>
+                      <button type="button" onClick={() => setForma({ id: p.id, naziv: p.naziv, opis: p.opis || '', datum_od: p.datum_od, datum_do: p.datum_do })} className={`font-semibold text-blue-700 hover:underline ${FOKUS}`}>Uredi</button>
+                      <button type="button" onClick={() => setBrise(p.id)} className={`font-semibold text-red-700 hover:underline ${FOKUS}`}>Obriši</button>
+                    </>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section aria-labelledby="naslov-novi-projekat" className="bg-white border border-slate-200 rounded-2xl p-5 h-fit">
+        <h2 id="naslov-novi-projekat" className="text-base font-bold text-slate-900">{forma.id ? 'Izmjena projekta' : 'Novi projekat'}</h2>
+        <form onSubmit={sacuvaj} className="mt-3 space-y-4">
+          <div>
+            <label htmlFor="pr-naziv" className="block text-sm font-semibold text-slate-800 mb-1">Naziv</label>
+            <input id="pr-naziv" required maxLength={120} value={forma.naziv} onChange={postavi('naziv')} placeholder="npr. Implementacija, Hotel X" className={polje} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label htmlFor="pr-od" className="block text-sm font-semibold text-slate-800 mb-1">Od</label>
+              <input id="pr-od" type="date" required value={forma.datum_od} onChange={postavi('datum_od')} className={polje} />
+            </div>
+            <div>
+              <label htmlFor="pr-do" className="block text-sm font-semibold text-slate-800 mb-1">Do</label>
+              <input id="pr-do" type="date" min={forma.datum_od || undefined} value={forma.datum_do} onChange={postavi('datum_do')} className={polje} />
+            </div>
+          </div>
+          <p className="text-xs text-slate-600 -mt-2">Za jednodnevni projekat ostavi "Do" prazno.</p>
+          <div>
+            <label htmlFor="pr-opis" className="block text-sm font-semibold text-slate-800 mb-1">Opis (nije obavezno)</label>
+            <textarea id="pr-opis" rows={3} maxLength={1000} value={forma.opis} onChange={postavi('opis')} placeholder="Ko učestvuje, gdje, šta je potrebno…" className={polje} />
+          </div>
+          <div className="flex gap-2">
+            {forma.id && (
+              <button type="button" onClick={() => setForma(prazno)} className={`px-4 py-2 rounded-lg text-sm font-semibold bg-slate-100 hover:bg-slate-200 text-slate-800 ${FOKUS}`}>Odustani</button>
+            )}
+            <button type="submit" disabled={slanje} className={`flex-1 px-4 py-2 rounded-lg text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white disabled:bg-slate-300 disabled:text-slate-600 disabled:cursor-not-allowed ${FOKUS}`}>
+              {slanje ? 'Čuvanje…' : forma.id ? 'Sačuvaj izmjene' : 'Dodaj projekat'}
+            </button>
+          </div>
+        </form>
+      </section>
     </div>
   );
 }

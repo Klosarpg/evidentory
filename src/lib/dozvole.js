@@ -7,6 +7,7 @@ export const DOZVOLE = [
   { kljuc: 'odsustvo_odobravanje', naziv: 'Odobravanje zahtjeva', grupa: 'Slobodni dani' },
   { kljuc: 'odsustvo_pregled_svih', naziv: 'Pregled svih korisnika', grupa: 'Slobodni dani' },
   { kljuc: 'odsustvo_dokument', naziv: 'Prima dokument za štampu', grupa: 'Slobodni dani' },
+  { kljuc: 'projekti_unos', naziv: 'Unos projekata u kalendar', grupa: 'Slobodni dani' },
   { kljuc: 'admin', naziv: 'Administracija (korisnici, uloge, artikli, komitenti)', grupa: 'Administracija' },
 ];
 
